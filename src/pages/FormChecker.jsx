@@ -1,6 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { createPoseDetector } from "../ai/poseDetection.js";
+
+/* ============================================================
+   EXERCISE CONFIG
+============================================================ */
 
 const FORM_ANALYZERS = {
   "push-up": {
@@ -18,6 +32,7 @@ const FORM_ANALYZERS = {
       "right_hip",
     ],
   },
+
   squat: {
     id: "squat",
     name: "Squat",
@@ -31,6 +46,7 @@ const FORM_ANALYZERS = {
       "right_ankle",
     ],
   },
+
   "sit-up": {
     id: "sit-up",
     name: "Sit-Up",
@@ -55,24 +71,76 @@ const DEFAULT_ANALYSIS = {
   metrics: {},
   repCount: 0,
   formScore: 0,
-  feedback: ["Move into a clear position so I can analyze your form."],
+  feedback: [
+    "Move into a clear position so I can analyze your form.",
+  ],
 };
+
+/* ============================================================
+   LANDMARK INDEX MAP
+============================================================ */
+
+const LANDMARK_INDEX = {
+  11: "left_shoulder",
+  12: "right_shoulder",
+  13: "left_elbow",
+  14: "right_elbow",
+  15: "left_wrist",
+  16: "right_wrist",
+
+  23: "left_hip",
+  24: "right_hip",
+  25: "left_knee",
+  26: "right_knee",
+  27: "left_ankle",
+  28: "right_ankle",
+};
+
+/* ============================================================
+   HELPERS
+============================================================ */
 
 function normalizeExerciseId(value) {
   if (!value) return "";
 
-  const lowered = String(value).trim().toLowerCase();
-  const withDashes = lowered.replace(/[_\s]+/g, "-");
+  const lowered = String(value)
+    .trim()
+    .toLowerCase();
 
-  if (withDashes === "pushup" || withDashes === "push-up") return "push-up";
-  if (withDashes === "squat" || withDashes === "squats") return "squat";
-  if (withDashes === "situp" || withDashes === "sit-up") return "sit-up";
+  const normalized = lowered.replace(
+    /[_\s]+/g,
+    "-"
+  );
+
+  if (
+    normalized === "pushup" ||
+    normalized === "push-up"
+  ) {
+    return "push-up";
+  }
+
+  if (
+    normalized === "squat" ||
+    normalized === "squats"
+  ) {
+    return "squat";
+  }
+
+  if (
+    normalized === "situp" ||
+    normalized === "sit-up"
+  ) {
+    return "sit-up";
+  }
 
   return "";
 }
 
 function safeNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return typeof value === "number" &&
+    Number.isFinite(value)
+    ? value
+    : null;
 }
 
 function getPoint(landmarks, key) {
@@ -89,8 +157,33 @@ function getPoint(landmarks, key) {
   return point;
 }
 
-function getAngle(pointA, pointB, pointC) {
-  if (!pointA || !pointB || !pointC) return null;
+function isVisible(point) {
+  if (!point) return false;
+
+  const visibility =
+    typeof point.visibility === "number"
+      ? point.visibility
+      : 1;
+
+  const presence =
+    typeof point.presence === "number"
+      ? point.presence
+      : 1;
+
+  return (
+    visibility >= 0.25 &&
+    presence >= 0.25
+  );
+}
+
+function getAngle(
+  pointA,
+  pointB,
+  pointC
+) {
+  if (!pointA || !pointB || !pointC) {
+    return null;
+  }
 
   const ab = {
     x: pointA.x - pointB.x,
@@ -102,37 +195,36 @@ function getAngle(pointA, pointB, pointC) {
     y: pointC.y - pointB.y,
   };
 
-  const dot = ab.x * cb.x + ab.y * cb.y;
-  const magAB = Math.hypot(ab.x, ab.y);
-  const magCB = Math.hypot(cb.x, cb.y);
-
-  if (!magAB || !magCB) return null;
-
-  const cosine = Math.max(
-    -1,
-    Math.min(1, dot / (magAB * magCB))
+  const magAB = Math.hypot(
+    ab.x,
+    ab.y
   );
 
-  return (Math.acos(cosine) * 180) / Math.PI;
-}
+  const magCB = Math.hypot(
+    cb.x,
+    cb.y
+  );
 
-function getBodyAlignment(landmarks) {
-  const leftShoulder = getPoint(landmarks, "left_shoulder");
-  const rightShoulder = getPoint(landmarks, "right_shoulder");
-  const leftHip = getPoint(landmarks, "left_hip");
-  const rightHip = getPoint(landmarks, "right_hip");
-
-  if (!leftShoulder || !rightShoulder || !leftHip || !rightHip) {
+  if (!magAB || !magCB) {
     return null;
   }
 
-  const shoulderMidY =
-    (leftShoulder.y + rightShoulder.y) / 2;
+  const dot =
+    ab.x * cb.x +
+    ab.y * cb.y;
 
-  const hipMidY =
-    (leftHip.y + rightHip.y) / 2;
+  const cosine = Math.max(
+    -1,
+    Math.min(
+      1,
+      dot / (magAB * magCB)
+    )
+  );
 
-  return Math.abs(shoulderMidY - hipMidY);
+  return (
+    (Math.acos(cosine) * 180) /
+    Math.PI
+  );
 }
 
 function averageNumbers(values) {
@@ -142,135 +234,315 @@ function averageNumbers(values) {
       Number.isFinite(value)
   );
 
-  if (!valid.length) return null;
+  if (!valid.length) {
+    return null;
+  }
 
   return (
-    valid.reduce((sum, value) => sum + value, 0) /
-    valid.length
+    valid.reduce(
+      (sum, value) =>
+        sum + value,
+      0
+    ) / valid.length
   );
 }
 
-function getTorsoHipSpread(landmarks) {
-  const leftShoulder = getPoint(landmarks, "left_shoulder");
-  const rightShoulder = getPoint(landmarks, "right_shoulder");
-  const leftHip = getPoint(landmarks, "left_hip");
-  const rightHip = getPoint(landmarks, "right_hip");
+/* ============================================================
+   ROBUST LANDMARK EXTRACTION
+============================================================ */
 
-  if (!leftShoulder || !rightShoulder || !leftHip || !rightHip) {
+function unwrapLandmarks(value) {
+  if (!value) return [];
+
+  if (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    Array.isArray(value[0])
+  ) {
+    return value[0];
+  }
+
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return [];
+}
+
+function normalizeLandmarksMap(rawLandmarks) {
+  if (!rawLandmarks) {
+    return {};
+  }
+
+  /*
+   * Direct array:
+   * [33 landmarks]
+   *
+   * Nested MediaPipe style:
+   * [[33 landmarks]]
+   */
+  const array =
+    unwrapLandmarks(rawLandmarks);
+
+  if (array.length) {
+    const map = {};
+
+    array.forEach(
+      (landmark, index) => {
+        const key =
+          LANDMARK_INDEX[index];
+
+        if (
+          key &&
+          landmark &&
+          typeof landmark.x ===
+            "number" &&
+          typeof landmark.y ===
+            "number"
+        ) {
+          map[key] = landmark;
+        }
+      }
+    );
+
+    return map;
+  }
+
+  /*
+   * Already-normalized object.
+   */
+  if (
+    typeof rawLandmarks ===
+      "object" &&
+    !Array.isArray(rawLandmarks)
+  ) {
+    return rawLandmarks;
+  }
+
+  return {};
+}
+
+/* ============================================================
+   EXTRACT POSE RESULT
+============================================================ */
+
+function extractPoseLandmarks(results) {
+  if (!results) {
+    return [];
+  }
+
+  const candidates = [
+    results.poseLandmarks,
+    results.landmarksArray,
+    results.landmarks,
+    results.pose?.landmarks,
+    results.pose?.poseLandmarks,
+    results.results?.poseLandmarks,
+    results.results?.landmarks,
+  ];
+
+  for (const candidate of candidates) {
+    const landmarks =
+      unwrapLandmarks(candidate);
+
+    if (
+      Array.isArray(landmarks) &&
+      landmarks.length > 0
+    ) {
+      return landmarks;
+    }
+  }
+
+  return [];
+}
+
+/* ============================================================
+   PUSH-UP GEOMETRY
+============================================================ */
+
+function getElbowAngle(
+  landmarks,
+  side
+) {
+  return getAngle(
+    getPoint(
+      landmarks,
+      `${side}_shoulder`
+    ),
+    getPoint(
+      landmarks,
+      `${side}_elbow`
+    ),
+    getPoint(
+      landmarks,
+      `${side}_wrist`
+    )
+  );
+}
+
+function getKneeAngle(
+  landmarks,
+  side
+) {
+  return getAngle(
+    getPoint(
+      landmarks,
+      `${side}_hip`
+    ),
+    getPoint(
+      landmarks,
+      `${side}_knee`
+    ),
+    getPoint(
+      landmarks,
+      `${side}_ankle`
+    )
+  );
+}
+
+function getHipAngle(
+  landmarks,
+  side
+) {
+  return getAngle(
+    getPoint(
+      landmarks,
+      `${side}_shoulder`
+    ),
+    getPoint(
+      landmarks,
+      `${side}_hip`
+    ),
+    getPoint(
+      landmarks,
+      `${side}_knee`
+    )
+  );
+}
+
+function getTorsoDistance(landmarks) {
+  const leftShoulder =
+    getPoint(
+      landmarks,
+      "left_shoulder"
+    );
+
+  const rightShoulder =
+    getPoint(
+      landmarks,
+      "right_shoulder"
+    );
+
+  const leftHip =
+    getPoint(
+      landmarks,
+      "left_hip"
+    );
+
+  const rightHip =
+    getPoint(
+      landmarks,
+      "right_hip"
+    );
+
+  if (
+    !leftShoulder ||
+    !rightShoulder ||
+    !leftHip ||
+    !rightHip
+  ) {
     return null;
   }
 
   const shoulderY =
-    (leftShoulder.y + rightShoulder.y) / 2;
+    (leftShoulder.y +
+      rightShoulder.y) /
+    2;
 
   const hipY =
-    (leftHip.y + rightHip.y) / 2;
+    (leftHip.y +
+      rightHip.y) /
+    2;
 
-  return Math.abs(shoulderY - hipY);
-}
-
-function getElbowFlexion(landmarks) {
-  const leftElbow = getAngle(
-    getPoint(landmarks, "left_shoulder"),
-    getPoint(landmarks, "left_elbow"),
-    getPoint(landmarks, "left_wrist")
-  );
-
-  const rightElbow = getAngle(
-    getPoint(landmarks, "right_shoulder"),
-    getPoint(landmarks, "right_elbow"),
-    getPoint(landmarks, "right_wrist")
-  );
-
-  return averageNumbers(
-    [safeNumber(leftElbow), safeNumber(rightElbow)].filter(
-      (value) => value != null
-    )
+  return Math.abs(
+    shoulderY - hipY
   );
 }
 
-function getHipKneeFlexion(landmarks) {
-  const leftHip = getAngle(
-    getPoint(landmarks, "left_shoulder"),
-    getPoint(landmarks, "left_hip"),
-    getPoint(landmarks, "left_knee")
-  );
+/* ============================================================
+   BEST PUSH-UP SIDE
+============================================================ */
 
-  const rightHip = getAngle(
-    getPoint(landmarks, "right_shoulder"),
-    getPoint(landmarks, "right_hip"),
-    getPoint(landmarks, "right_knee")
-  );
+function getBestPushUpSide(
+  landmarks
+) {
+  const leftAngle =
+    getElbowAngle(
+      landmarks,
+      "left"
+    );
 
-  return averageNumbers(
-    [safeNumber(leftHip), safeNumber(rightHip)].filter(
-      (value) => value != null
-    )
-  );
-}
+  const rightAngle =
+    getElbowAngle(
+      landmarks,
+      "right"
+    );
 
-function getKneeDrive(landmarks) {
-  const leftKnee = getAngle(
-    getPoint(landmarks, "left_hip"),
-    getPoint(landmarks, "left_knee"),
-    getPoint(landmarks, "left_ankle")
-  );
+  const leftElbow =
+    getPoint(
+      landmarks,
+      "left_elbow"
+    );
 
-  const rightKnee = getAngle(
-    getPoint(landmarks, "right_hip"),
-    getPoint(landmarks, "right_knee"),
-    getPoint(landmarks, "right_ankle")
-  );
+  const rightElbow =
+    getPoint(
+      landmarks,
+      "right_elbow"
+    );
 
-  return averageNumbers(
-    [safeNumber(leftKnee), safeNumber(rightKnee)].filter(
-      (value) => value != null
-    )
-  );
-}
+  const leftVisible =
+    isVisible(leftElbow) &&
+    safeNumber(leftAngle) !== null;
 
-function getBestVisibleElbow(landmarks) {
-  const leftAngle = getAngle(
-    getPoint(landmarks, "left_shoulder"),
-    getPoint(landmarks, "left_elbow"),
-    getPoint(landmarks, "left_wrist")
-  );
-
-  const rightAngle = getAngle(
-    getPoint(landmarks, "right_shoulder"),
-    getPoint(landmarks, "right_elbow"),
-    getPoint(landmarks, "right_wrist")
-  );
+  const rightVisible =
+    isVisible(rightElbow) &&
+    safeNumber(rightAngle) !== null;
 
   if (
-    safeNumber(leftAngle) != null &&
-    safeNumber(rightAngle) != null
+    leftVisible &&
+    rightVisible
   ) {
-    return {
-      side:
-        Math.abs(180 - safeNumber(leftAngle)) <=
-        Math.abs(180 - safeNumber(rightAngle))
-          ? "LEFT"
-          : "RIGHT",
-      angle:
-        Math.abs(180 - safeNumber(leftAngle)) <=
-        Math.abs(180 - safeNumber(rightAngle))
-          ? safeNumber(leftAngle)
-          : safeNumber(rightAngle),
-    };
+    /*
+     * Prefer the side whose elbow angle
+     * is more useful for movement tracking.
+     */
+    return Math.abs(
+      leftAngle - 90
+    ) <
+      Math.abs(
+        rightAngle - 90
+      )
+      ? {
+          side: "LEFT",
+          angle: leftAngle,
+        }
+      : {
+          side: "RIGHT",
+          angle: rightAngle,
+        };
   }
 
-  if (safeNumber(leftAngle) != null) {
+  if (leftVisible) {
     return {
       side: "LEFT",
-      angle: safeNumber(leftAngle),
+      angle: leftAngle,
     };
   }
 
-  if (safeNumber(rightAngle) != null) {
+  if (rightVisible) {
     return {
       side: "RIGHT",
-      angle: safeNumber(rightAngle),
+      angle: rightAngle,
     };
   }
 
@@ -280,275 +552,83 @@ function getBestVisibleElbow(landmarks) {
   };
 }
 
-function classifyMovementPattern(
+/* ============================================================
+   PUSH-UP ANALYZER
+============================================================ */
+
+function buildPushUpAnalysis(
   landmarks,
-  selectedExercise,
-  prior
+  state
 ) {
-  const priorState =
-    prior || {
-      lastElbowAngle: null,
-      lastTorsoDistance: null,
-      lastHipKneeAngle: null,
-      lastKneeDrive: null,
-    };
-
-  const elbowFlexion = getElbowFlexion(landmarks);
-  const torsoDistance = getTorsoHipSpread(landmarks);
-  const hipKneeAngle = getHipKneeFlexion(landmarks);
-  const kneeDrive = getKneeDrive(landmarks);
-
-  if (selectedExercise === "push-up") {
-    const elbowDelta =
-      priorState.lastElbowAngle == null
-        ? null
-        : Math.abs(
-            elbowFlexion - priorState.lastElbowAngle
-          );
-
-    const torsoDelta =
-      priorState.lastTorsoDistance == null
-        ? null
-        : Math.abs(
-            (torsoDistance ?? 0) -
-              priorState.lastTorsoDistance
-          );
-
-    const hasMeaningfulElbowMotion =
-      elbowFlexion != null &&
-      elbowDelta != null &&
-      elbowDelta > 12 &&
-      elbowFlexion > 60 &&
-      elbowFlexion < 170;
-
-    const hasPushAlignment =
-      torsoDistance != null &&
-      torsoDistance < 0.18 &&
-      (hipKneeAngle == null || hipKneeAngle > 90);
-
-    const valid = Boolean(
-      hasMeaningfulElbowMotion &&
-        hasPushAlignment &&
-        (torsoDelta == null || torsoDelta < 0.2)
+  const leftElbowAngle =
+    getElbowAngle(
+      landmarks,
+      "left"
     );
 
-    return {
-      movement: valid ? "PUSH-UP" : "UNKNOWN",
-      confidence: valid ? 94 : 0,
-      primaryMetric:
-        elbowFlexion != null
-          ? Number(elbowFlexion.toFixed(1))
-          : null,
-      secondaryMetric:
-        torsoDistance != null
-          ? Number(torsoDistance.toFixed(3))
-          : null,
-      wrongExercise: !valid,
-      phase:
-        elbowFlexion != null && elbowFlexion < 120
-          ? "DESCENDING"
-          : elbowFlexion != null && elbowFlexion > 150
-          ? "ASCENDING"
-          : "READY",
-      valid,
-    };
-  }
-
-  if (selectedExercise === "sit-up") {
-    const torsoDelta =
-      priorState.lastTorsoDistance == null
-        ? null
-        : Math.abs(
-            (torsoDistance ?? 0) -
-              priorState.lastTorsoDistance
-          );
-
-    const hipKneeDelta =
-      priorState.lastHipKneeAngle == null
-        ? null
-        : Math.abs(
-            (hipKneeAngle ?? 0) -
-              priorState.lastHipKneeAngle
-          );
-
-    const elbowDriven =
-      elbowFlexion != null &&
-      elbowFlexion < 150 &&
-      elbowFlexion > 60;
-
-    const sitUpGeometry =
-      torsoDistance != null &&
-      torsoDistance > 0.06 &&
-      hipKneeAngle != null &&
-      hipKneeAngle > 60 &&
-      (hipKneeDelta == null || hipKneeDelta > 8);
-
-    const valid = Boolean(
-      sitUpGeometry &&
-        !elbowDriven &&
-        (torsoDelta == null || torsoDelta > 0.02)
+  const rightElbowAngle =
+    getElbowAngle(
+      landmarks,
+      "right"
     );
-
-    return {
-      movement: valid ? "SIT-UP" : "UNKNOWN",
-      confidence: valid ? 92 : 0,
-      primaryMetric:
-        hipKneeAngle != null
-          ? Number(hipKneeAngle.toFixed(1))
-          : null,
-      secondaryMetric:
-        torsoDistance != null
-          ? Number(torsoDistance.toFixed(3))
-          : null,
-      wrongExercise: !valid,
-      phase:
-        hipKneeAngle != null && hipKneeAngle < 100
-          ? "DESCENDING"
-          : hipKneeAngle != null && hipKneeAngle > 140
-          ? "ASCENDING"
-          : "READY",
-      valid,
-    };
-  }
-
-  return {
-    movement: "UNKNOWN",
-    confidence: 0,
-    primaryMetric: null,
-    secondaryMetric: null,
-    wrongExercise: true,
-    phase: "READY",
-    valid: false,
-  };
-}
-
-function normalizeLandmarksMap(rawLandmarks) {
-  if (!rawLandmarks) return {};
-
-  if (Array.isArray(rawLandmarks)) {
-    const landmarkMap = {};
-
-    const keyMap = {
-      11: "left_shoulder",
-      12: "right_shoulder",
-      13: "left_elbow",
-      14: "right_elbow",
-      15: "left_wrist",
-      16: "right_wrist",
-      23: "left_hip",
-      24: "right_hip",
-      25: "left_knee",
-      26: "right_knee",
-      27: "left_ankle",
-      28: "right_ankle",
-    };
-
-    rawLandmarks.forEach((landmark, index) => {
-      const key = keyMap[index];
-
-      if (key) {
-        landmarkMap[key] = landmark;
-      }
-    });
-
-    return landmarkMap;
-  }
-
-  return rawLandmarks;
-}
-
-function buildPushUpAnalysis(landmarks, state) {
-  const leftShoulder = getPoint(
-    landmarks,
-    "left_shoulder"
-  );
-  const rightShoulder = getPoint(
-    landmarks,
-    "right_shoulder"
-  );
-  const leftElbow = getPoint(
-    landmarks,
-    "left_elbow"
-  );
-  const rightElbow = getPoint(
-    landmarks,
-    "right_elbow"
-  );
-  const leftWrist = getPoint(
-    landmarks,
-    "left_wrist"
-  );
-  const rightWrist = getPoint(
-    landmarks,
-    "right_wrist"
-  );
-
-  const leftElbowAngle = getAngle(
-    leftShoulder,
-    leftElbow,
-    leftWrist
-  );
-
-  const rightElbowAngle = getAngle(
-    rightShoulder,
-    rightElbow,
-    rightWrist
-  );
 
   const validAngles = [
-    safeNumber(leftElbowAngle),
-    safeNumber(rightElbowAngle),
-  ].filter((value) => value != null);
+    leftElbowAngle,
+    rightElbowAngle,
+  ].filter(
+    (value) =>
+      safeNumber(value) !== null
+  );
 
   if (!validAngles.length) {
     return {
+      ...DEFAULT_ANALYSIS,
       exerciseId: "push-up",
-      poseDetected: false,
-      landmarkCount: 0,
-      confidence: 0,
-      phase: "READY",
-      metrics: {
-        leftElbowAngle: null,
-        rightElbowAngle: null,
-        movementMetric: {
-          leftElbowAngle: null,
-          rightElbowAngle: null,
-        },
-      },
-      repCount: Number.isFinite(state.repCount)
-        ? state.repCount
-        : 0,
-      formScore: 0,
-      feedback: ["Pose: NOT DETECTED"],
+      feedback: [
+        "Move your full upper body into the camera view.",
+      ],
       trace: {
         lastTransition:
-          state.lastTransition || "READY",
-        why: "No usable elbow landmarks for push-up.",
+          state.lastTransition,
+        why:
+          "No usable elbow landmarks.",
       },
-      currentAngle: state.lastAngle ?? null,
-      repBlockedReason: "Landmarks unavailable",
+      repBlockedReason:
+        "Elbows not visible",
       selectedElbow: "NONE",
+      currentAngle: null,
     };
   }
 
-  const selectedElbow = getBestVisibleElbow(landmarks);
+  const selected =
+    getBestPushUpSide(
+      landmarks
+    );
 
   const currentAngle =
-    selectedElbow.angle ??
-    averageNumbers(validAngles);
+    selected.angle ??
+    averageNumbers(
+      validAngles
+    );
 
   const previousAngle =
-    typeof state.lastAngle === "number"
-      ? state.lastAngle
-      : currentAngle;
+    safeNumber(
+      state.lastAngle
+    ) ?? currentAngle;
 
-  let phase = state.phase || "READY";
-  let repCount = Number.isFinite(state.repCount)
-    ? state.repCount
-    : 0;
+  let phase =
+    state.phase || "READY";
+
+  let repCount =
+    Number.isFinite(
+      state.repCount
+    )
+      ? state.repCount
+      : 0;
 
   let lastTransition =
-    state.lastTransition || "READY";
+    state.lastTransition ||
+    "READY";
 
   let why =
     state.lastReason ||
@@ -556,93 +636,175 @@ function buildPushUpAnalysis(landmarks, state) {
 
   let repBlockedReason = null;
 
+  /*
+   * READY
+   *
+   * Detect the beginning of downward movement.
+   */
   if (phase === "READY") {
     if (
-      currentAngle < 155 &&
-      previousAngle - currentAngle >= 8
+      previousAngle -
+        currentAngle >=
+        5 &&
+      currentAngle <
+        165
     ) {
       phase = "DESCENDING";
-      lastTransition = "READY → DESCENDING";
-      why = `selected elbow ${selectedElbow.side}: ${previousAngle.toFixed(
+
+      lastTransition =
+        "READY → DESCENDING";
+
+      why = `Elbow ${previousAngle.toFixed(
         1
-      )}° → ${currentAngle.toFixed(1)}°`;
-    } else {
-      repBlockedReason =
-        "Waiting for elbow movement";
-    }
-  } else if (phase === "DESCENDING") {
-    if (currentAngle <= 115) {
-      phase = "BOTTOM";
-      lastTransition = "DESCENDING → BOTTOM";
-      why = `bottom position reached: ${currentAngle.toFixed(
+      )}° → ${currentAngle.toFixed(
         1
       )}°`;
     } else {
       repBlockedReason =
-        "Waiting for bottom position";
+        "Waiting for downward movement";
     }
-  } else if (phase === "BOTTOM") {
+  }
+
+  /*
+   * DESCENDING
+   *
+   * Reach bottom.
+   */
+  else if (
+    phase === "DESCENDING"
+  ) {
     if (
-      currentAngle >= previousAngle + 8
+      currentAngle <= 115
     ) {
-      phase = "ASCENDING";
-      lastTransition = "BOTTOM → ASCENDING";
-      why = `ascending from bottom: ${previousAngle.toFixed(
+      phase = "BOTTOM";
+
+      lastTransition =
+        "DESCENDING → BOTTOM";
+
+      why = `Bottom reached at ${currentAngle.toFixed(
         1
-      )}° → ${currentAngle.toFixed(1)}°`;
+      )}°`;
     } else {
       repBlockedReason =
-        "Waiting for upward drive";
+        "Go lower";
     }
-  } else if (phase === "ASCENDING") {
+  }
+
+  /*
+   * BOTTOM
+   *
+   * Detect upward movement.
+   */
+  else if (
+    phase === "BOTTOM"
+  ) {
     if (
-      currentAngle >= 150 &&
-      currentAngle >= previousAngle - 2
+      currentAngle -
+        previousAngle >=
+        5
+    ) {
+      phase = "ASCENDING";
+
+      lastTransition =
+        "BOTTOM → ASCENDING";
+
+      why = `Moving upward ${previousAngle.toFixed(
+        1
+      )}° → ${currentAngle.toFixed(
+        1
+      )}°`;
+    } else {
+      repBlockedReason =
+        "Push upward";
+    }
+  }
+
+  /*
+   * ASCENDING
+   *
+   * Full extension completes rep.
+   */
+  else if (
+    phase === "ASCENDING"
+  ) {
+    if (
+      currentAngle >=
+      150
     ) {
       repCount += 1;
+
       phase = "READY";
-      lastTransition = "ASCENDING → READY";
-      why = `full top return: ${previousAngle.toFixed(
-        1
-      )}° → ${currentAngle.toFixed(1)}°`;
+
+      lastTransition =
+        "ASCENDING → READY";
+
+      why = `Rep ${repCount} completed`;
+
       repBlockedReason = null;
     } else {
       repBlockedReason =
-        "Waiting for full return";
+        "Fully extend your arms";
     }
   }
 
+  /*
+   * Feedback
+   */
   let feedback = [
-    "Move into a clear position so I can analyze your form.",
+    "Get into push-up position.",
   ];
 
-  if (phase === "READY" && repBlockedReason) {
-    feedback = [repBlockedReason];
-  } else if (phase === "DESCENDING") {
+  if (
+    phase === "DESCENDING"
+  ) {
     feedback = [
-      "Lower with control and keep the elbow moving through the full range.",
+      "Good. Lower your body with control.",
     ];
-  } else if (phase === "BOTTOM") {
+  } else if (
+    phase === "BOTTOM"
+  ) {
     feedback = [
-      "Great depth. Push back up and extend the arms.",
+      "Good depth. Push back up.",
     ];
-  } else if (phase === "ASCENDING") {
+  } else if (
+    phase === "ASCENDING"
+  ) {
     feedback = [
-      "Drive upward and finish with full elbow extension.",
+      "Keep pushing until your arms are extended.",
     ];
-  } else if (currentAngle >= 150) {
+  } else if (
+    phase === "READY" &&
+    repCount > 0
+  ) {
     feedback = [
-      "Excellent push-up range. Hold the top position and reset.",
+      `Great! ${repCount} push-up${
+        repCount === 1
+          ? ""
+          : "s"
+      } completed.`,
     ];
   }
 
-  const formScore = Math.max(
-    0,
-    Math.min(
-      100,
-      100 - Math.abs(currentAngle - 90) * 0.8
-    )
-  );
+  /*
+   * Form score:
+   *
+   * Best score around 90°.
+   */
+  const formScore =
+    currentAngle !== null
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            100 -
+              Math.abs(
+                currentAngle -
+                  90
+              ) *
+                0.5
+          )
+        )
+      : 0;
 
   return {
     exerciseId: "push-up",
@@ -651,11 +813,23 @@ function buildPushUpAnalysis(landmarks, state) {
     confidence: 100,
     phase,
     metrics: {
-      leftElbowAngle: safeNumber(leftElbowAngle),
-      rightElbowAngle: safeNumber(rightElbowAngle),
+      leftElbowAngle:
+        safeNumber(
+          leftElbowAngle
+        ),
+      rightElbowAngle:
+        safeNumber(
+          rightElbowAngle
+        ),
       movementMetric: {
-        leftElbowAngle: safeNumber(leftElbowAngle),
-        rightElbowAngle: safeNumber(rightElbowAngle),
+        leftElbowAngle:
+          safeNumber(
+            leftElbowAngle
+          ),
+        rightElbowAngle:
+          safeNumber(
+            rightElbowAngle
+          ),
       },
     },
     repCount,
@@ -667,194 +841,224 @@ function buildPushUpAnalysis(landmarks, state) {
     },
     currentAngle,
     repBlockedReason,
-    selectedElbow: selectedElbow.side,
+    selectedElbow:
+      selected.side,
   };
 }
 
-function buildSquatAnalysis(landmarks, state) {
-  const leftHip = getPoint(
-    landmarks,
-    "left_hip"
-  );
-  const rightHip = getPoint(
-    landmarks,
-    "right_hip"
-  );
-  const leftKnee = getPoint(
-    landmarks,
-    "left_knee"
-  );
-  const rightKnee = getPoint(
-    landmarks,
-    "right_knee"
-  );
-  const leftAnkle = getPoint(
-    landmarks,
-    "left_ankle"
-  );
-  const rightAnkle = getPoint(
-    landmarks,
-    "right_ankle"
-  );
-  const leftShoulder = getPoint(
-    landmarks,
-    "left_shoulder"
-  );
-  const rightShoulder = getPoint(
-    landmarks,
-    "right_shoulder"
-  );
+/* ============================================================
+   SQUAT ANALYZER
+============================================================ */
 
-  const leftKneeAngle = getAngle(
-    leftHip,
-    leftKnee,
-    leftAnkle
-  );
+function buildSquatAnalysis(
+  landmarks,
+  state
+) {
+  const leftKneeAngle =
+    getKneeAngle(
+      landmarks,
+      "left"
+    );
 
-  const rightKneeAngle = getAngle(
-    rightHip,
-    rightKnee,
-    rightAnkle
-  );
+  const rightKneeAngle =
+    getKneeAngle(
+      landmarks,
+      "right"
+    );
 
-  const leftHipAngle = getAngle(
-    leftShoulder,
-    leftHip,
-    leftKnee
-  );
+  const leftHipAngle =
+    getHipAngle(
+      landmarks,
+      "left"
+    );
 
-  const rightHipAngle = getAngle(
-    rightShoulder,
-    rightHip,
-    rightKnee
-  );
+  const rightHipAngle =
+    getHipAngle(
+      landmarks,
+      "right"
+    );
 
   const validKneeAngles = [
-    safeNumber(leftKneeAngle),
-    safeNumber(rightKneeAngle),
-  ].filter((value) => value != null);
+    leftKneeAngle,
+    rightKneeAngle,
+  ].filter(
+    (value) =>
+      safeNumber(value) !== null
+  );
 
   if (!validKneeAngles.length) {
     return {
+      ...DEFAULT_ANALYSIS,
       exerciseId: "squat",
-      poseDetected: false,
-      landmarkCount: 0,
-      confidence: 0,
-      phase: "READY",
-      metrics: {
-        leftKneeAngle: null,
-        rightKneeAngle: null,
-        leftHipAngle: null,
-        rightHipAngle: null,
-        movementMetric: {
-          leftKneeAngle: null,
-          rightKneeAngle: null,
-          leftHipAngle: null,
-          rightHipAngle: null,
-        },
-      },
-      repCount: Number.isFinite(state.repCount)
-        ? state.repCount
-        : 0,
-      formScore: 0,
-      feedback: ["Pose: NOT DETECTED"],
+      feedback: [
+        "Move your legs completely into the camera view.",
+      ],
       trace: {
         lastTransition:
-          state.lastTransition || "READY",
-        why: "No usable knee landmarks for squat.",
+          state.lastTransition,
+        why:
+          "No usable knee landmarks.",
       },
-      currentAngle: state.lastAngle ?? null,
+      currentAngle: null,
     };
   }
 
   const currentAngle =
-    averageNumbers(validKneeAngles);
+    averageNumbers(
+      validKneeAngles
+    );
 
   const previousAngle =
-    typeof state.lastAngle === "number"
-      ? state.lastAngle
-      : currentAngle;
+    safeNumber(
+      state.lastAngle
+    ) ?? currentAngle;
 
-  let phase = state.phase || "READY";
+  let phase =
+    state.phase || "READY";
 
-  let repCount = Number.isFinite(state.repCount)
-    ? state.repCount
-    : 0;
+  let repCount =
+    Number.isFinite(
+      state.repCount
+    )
+      ? state.repCount
+      : 0;
 
   let lastTransition =
-    state.lastTransition || "READY";
+    state.lastTransition ||
+    "READY";
 
   let why =
     state.lastReason ||
     "Waiting for movement.";
 
+  /*
+   * START DESCENT
+   */
   if (
     phase === "READY" &&
-    currentAngle < 165 &&
-    currentAngle < previousAngle - 6
+    previousAngle -
+      currentAngle >=
+      5 &&
+    currentAngle <
+      165
   ) {
     phase = "DESCENDING";
-    lastTransition = "READY → DESCENDING";
-    why = `knee angle ${previousAngle.toFixed(
+
+    lastTransition =
+      "READY → DESCENDING";
+
+    why = `Knee ${previousAngle.toFixed(
       1
-    )}° → ${currentAngle.toFixed(1)}°`;
-  } else if (
-    phase === "DESCENDING" &&
-    currentAngle < 105
-  ) {
-    phase = "BOTTOM";
-    lastTransition = "DESCENDING → BOTTOM";
-    why = `squat depth reached: ${currentAngle.toFixed(
+    )}° → ${currentAngle.toFixed(
       1
     )}°`;
-  } else if (
+  }
+
+  /*
+   * BOTTOM
+   */
+  else if (
+    phase === "DESCENDING" &&
+    currentAngle <=
+      105
+  ) {
+    phase = "BOTTOM";
+
+    lastTransition =
+      "DESCENDING → BOTTOM";
+
+    why = `Squat depth ${currentAngle.toFixed(
+      1
+    )}°`;
+  }
+
+  /*
+   * START ASCENT
+   */
+  else if (
     phase === "BOTTOM" &&
-    currentAngle > 120 &&
-    currentAngle > previousAngle + 6
+    currentAngle -
+      previousAngle >=
+      5
   ) {
     phase = "ASCENDING";
-    lastTransition = "BOTTOM → ASCENDING";
-    why = `standing up: ${previousAngle.toFixed(
+
+    lastTransition =
+      "BOTTOM → ASCENDING";
+
+    why = `Standing up ${previousAngle.toFixed(
       1
-    )}° → ${currentAngle.toFixed(1)}°`;
-  } else if (
+    )}° → ${currentAngle.toFixed(
+      1
+    )}°`;
+  }
+
+  /*
+   * COMPLETE REP
+   */
+  else if (
     phase === "ASCENDING" &&
-    currentAngle > 155 &&
-    currentAngle > previousAngle + 4
+    currentAngle >=
+      155
   ) {
     repCount += 1;
+
     phase = "READY";
-    lastTransition = "ASCENDING → READY";
-    why = `complete squat cycle: ${previousAngle.toFixed(
-      1
-    )}° → ${currentAngle.toFixed(1)}°`;
+
+    lastTransition =
+      "ASCENDING → READY";
+
+    why = `Rep ${repCount} completed`;
   }
 
   let feedback = [
-    "Move into a clear position so I can analyze your form.",
+    "Stand in a clear position.",
   ];
 
-  if (currentAngle < 105) {
+  if (
+    phase === "DESCENDING"
+  ) {
     feedback = [
-      "Stay upright through the torso and drive up strongly from the hips.",
+      "Control your descent.",
     ];
-  } else if (currentAngle < 155) {
+  } else if (
+    phase === "BOTTOM"
+  ) {
     feedback = [
-      "Control the descent and stop when your thighs are close to parallel.",
+      "Good depth. Drive upward.",
     ];
-  } else {
+  } else if (
+    phase === "ASCENDING"
+  ) {
     feedback = [
-      "Excellent squat depth and strong upward drive.",
+      "Push through your feet and stand tall.",
+    ];
+  } else if (
+    phase === "READY" &&
+    repCount > 0
+  ) {
+    feedback = [
+      `Great! ${repCount} squat${
+        repCount === 1
+          ? ""
+          : "s"
+      } completed.`,
     ];
   }
 
-  const formScore = Math.max(
-    0,
-    Math.min(
-      100,
-      100 - Math.abs(currentAngle - 90) * 0.7
-    )
-  );
+  const formScore =
+    Math.max(
+      0,
+      Math.min(
+        100,
+        100 -
+          Math.abs(
+            currentAngle -
+              90
+          ) *
+            0.4
+      )
+    );
 
   return {
     exerciseId: "squat",
@@ -863,15 +1067,31 @@ function buildSquatAnalysis(landmarks, state) {
     confidence: 100,
     phase,
     metrics: {
-      leftKneeAngle: safeNumber(leftKneeAngle),
-      rightKneeAngle: safeNumber(rightKneeAngle),
-      leftHipAngle: safeNumber(leftHipAngle),
-      rightHipAngle: safeNumber(rightHipAngle),
+      leftKneeAngle:
+        safeNumber(
+          leftKneeAngle
+        ),
+      rightKneeAngle:
+        safeNumber(
+          rightKneeAngle
+        ),
+      leftHipAngle:
+        safeNumber(
+          leftHipAngle
+        ),
+      rightHipAngle:
+        safeNumber(
+          rightHipAngle
+        ),
       movementMetric: {
-        leftKneeAngle: safeNumber(leftKneeAngle),
-        rightKneeAngle: safeNumber(rightKneeAngle),
-        leftHipAngle: safeNumber(leftHipAngle),
-        rightHipAngle: safeNumber(rightHipAngle),
+        leftKneeAngle:
+          safeNumber(
+            leftKneeAngle
+          ),
+        rightKneeAngle:
+          safeNumber(
+            rightKneeAngle
+          ),
       },
     },
     repCount,
@@ -882,149 +1102,221 @@ function buildSquatAnalysis(landmarks, state) {
       why,
     },
     currentAngle,
+    wrongExercise: false,
   };
 }
 
-function leftShoulderFallback(landmarks, key) {
-  return (
-    getPoint(landmarks, key) ||
-    getPoint(landmarks, "left_shoulder")
-  );
-}
+/* ============================================================
+   CAMERA ERROR
+============================================================ */
 
-function rightShoulderFallback(landmarks, key) {
-  return (
-    getPoint(landmarks, key) ||
-    getPoint(landmarks, "right_shoulder")
-  );
-}
-
-function getCameraErrorMessage(error) {
-  const name = error?.name || "UnknownError";
+function getCameraErrorMessage(
+  error
+) {
+  const name =
+    error?.name ||
+    "UnknownError";
 
   if (
-    name === "NotAllowedError" ||
-    name === "PermissionDeniedError"
+    name ===
+      "NotAllowedError" ||
+    name ===
+      "PermissionDeniedError"
   ) {
-    return "Camera permission denied. Allow camera access in your browser settings.";
+    return "Camera permission denied. Allow camera access and try again.";
   }
 
   if (
-    name === "NotReadableError" ||
-    name === "TrackStartError"
+    name ===
+      "NotReadableError" ||
+    name ===
+      "TrackStartError"
   ) {
-    return "Camera is unavailable. Close other apps using the camera and try again.";
+    return "Camera is being used by another application.";
   }
 
   if (
-    name === "NotFoundError" ||
-    name === "DevicesNotFoundError"
+    name ===
+      "NotFoundError" ||
+    name ===
+      "DevicesNotFoundError"
   ) {
-    return "Camera is unavailable. No usable camera was found.";
+    return "No usable camera was found.";
   }
 
   if (
-    name === "OverconstrainedError" ||
-    name === "ConstraintNotSatisfiedError"
+    name ===
+      "OverconstrainedError" ||
+    name ===
+      "ConstraintNotSatisfiedError"
   ) {
     return "The requested camera configuration is unavailable.";
   }
 
-  if (name === "AbortError") {
-    return "Camera startup was interrupted. Please try again.";
+  if (
+    name ===
+    "SecurityError"
+  ) {
+    return "Camera access requires HTTPS or localhost.";
   }
 
-  if (name === "SecurityError") {
-    return "Camera access was blocked by the browser. Make sure you are using HTTPS.";
+  if (
+    name ===
+    "AbortError"
+  ) {
+    return "Camera startup was interrupted.";
   }
 
-  return "Unable to start video preview.";
+  return (
+    error?.message ||
+    "Unable to start camera."
+  );
 }
 
-function waitForVideo(video) {
-  return new Promise((resolve, reject) => {
-    if (!video) {
-      reject(
-        new Error("Video element is not ready.")
-      );
-      return;
-    }
+/* ============================================================
+   VIDEO READY
+============================================================ */
 
-    const ready = () =>
-      video.readyState >= 2 &&
-      video.videoWidth > 0 &&
-      video.videoHeight > 0;
-
-    if (ready()) {
-      resolve();
-      return;
-    }
-
-    const onReady = () => {
-      if (ready()) {
-        cleanup();
-        resolve();
+function waitForVideo(
+  video
+) {
+  return new Promise(
+    (resolve, reject) => {
+      if (!video) {
+        reject(
+          new Error(
+            "Video element not found."
+          )
+        );
+        return;
       }
-    };
 
-    const onError = () => {
-      cleanup();
-      reject(
-        new Error("Video preview failed to load.")
-      );
-    };
+      const isReady =
+        video.readyState >= 2 &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0;
 
-    const cleanup = () => {
-      video.removeEventListener(
+      if (isReady) {
+        resolve();
+        return;
+      }
+
+      let finished = false;
+
+      const cleanup =
+        () => {
+          video.removeEventListener(
+            "loadedmetadata",
+            handleReady
+          );
+
+          video.removeEventListener(
+            "canplay",
+            handleReady
+          );
+
+          video.removeEventListener(
+            "playing",
+            handleReady
+          );
+
+          video.removeEventListener(
+            "error",
+            handleError
+          );
+
+          clearTimeout(
+            timeout
+          );
+        };
+
+      const complete =
+        () => {
+          if (finished) return;
+
+          if (
+            video.readyState >= 2 &&
+            video.videoWidth > 0 &&
+            video.videoHeight > 0
+          ) {
+            finished = true;
+            cleanup();
+            resolve();
+          }
+        };
+
+      const handleReady =
+        () => {
+          complete();
+        };
+
+      const handleError =
+        () => {
+          if (finished) return;
+
+          finished = true;
+          cleanup();
+
+          reject(
+            new Error(
+              "Video stream failed."
+            )
+          );
+        };
+
+      const timeout =
+        setTimeout(() => {
+          if (finished) return;
+
+          finished = true;
+          cleanup();
+
+          reject(
+            new Error(
+              "Timed out waiting for camera video."
+            )
+          );
+        }, 10000);
+
+      video.addEventListener(
         "loadedmetadata",
-        onReady
+        handleReady
       );
-      video.removeEventListener(
+
+      video.addEventListener(
         "canplay",
-        onReady
+        handleReady
       );
-      video.removeEventListener(
+
+      video.addEventListener(
+        "playing",
+        handleReady
+      );
+
+      video.addEventListener(
         "error",
-        onError
+        handleError
       );
-      clearTimeout(timeoutId);
-    };
-
-    const timeoutId = setTimeout(() => {
-      cleanup();
-      reject(
-        new Error(
-          "Timed out waiting for video stream."
-        )
-      );
-    }, 5000);
-
-    video.addEventListener(
-      "loadedmetadata",
-      onReady
-    );
-
-    video.addEventListener(
-      "canplay",
-      onReady
-    );
-
-    video.addEventListener(
-      "error",
-      onError
-    );
-  });
+    }
+  );
 }
+
+/* ============================================================
+   COMPONENT
+============================================================ */
 
 function FormChecker() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
   const {
-    exerciseId: routeExerciseId,
+    exerciseId:
+      routeExerciseId,
   } = useParams();
 
-  const [searchParams] =
-    useSearchParams();
+  const [
+    searchParams,
+  ] = useSearchParams();
 
   const requestedExerciseId =
     normalizeExerciseId(
@@ -1035,99 +1327,124 @@ function FormChecker() {
 
   const exerciseMeta =
     requestedExerciseId
-      ? FORM_ANALYZERS[requestedExerciseId]
+      ? FORM_ANALYZERS[
+          requestedExerciseId
+        ]
       : null;
 
   const isSupportedExercise =
     Boolean(exerciseMeta);
 
-  const [cameraStatus, setCameraStatus] =
-    useState("idle");
+  /* ============================================================
+     STATE
+  ============================================================ */
 
-  const [poseStatus, setPoseStatus] =
-    useState("loading");
+  const [
+    cameraStatus,
+    setCameraStatus,
+  ] = useState("idle");
 
-  const [cameraError, setCameraError] =
-    useState("");
+  const [
+    poseStatus,
+    setPoseStatus,
+  ] = useState("loading");
 
-  const [landmarks, setLandmarks] =
-    useState([]);
+  const [
+    cameraError,
+    setCameraError,
+  ] = useState("");
 
-  const [analysisResult, setAnalysisResult] =
-    useState({
-      ...DEFAULT_ANALYSIS,
-      exerciseId: requestedExerciseId,
-    });
+  const [
+    poseError,
+    setPoseError,
+  ] = useState("");
 
-  const [videoReady, setVideoReady] =
-    useState(false);
+  const [
+    landmarks,
+    setLandmarks,
+  ] = useState([]);
 
-  const [videoDimensions, setVideoDimensions] =
-    useState({
-      width: 0,
-      height: 0,
-    });
+  const [
+    analysisResult,
+    setAnalysisResult,
+  ] = useState({
+    ...DEFAULT_ANALYSIS,
+    exerciseId:
+      requestedExerciseId,
+  });
 
-  const [videoElementStatus, setVideoElementStatus] =
-    useState("NOT FOUND");
+  const [
+    videoReady,
+    setVideoReady,
+  ] = useState(false);
 
-  const [videoReadyState, setVideoReadyState] =
-    useState(0);
+  const [
+    videoDimensions,
+    setVideoDimensions,
+  ] = useState({
+    width: 0,
+    height: 0,
+  });
 
-  const [videoSrcObjectStatus, setVideoSrcObjectStatus] =
-    useState("NOT CONNECTED");
+  const [
+    cameraPermissionState,
+    setCameraPermissionState,
+  ] = useState("UNKNOWN");
 
-  const [poseDetectorStatus, setPoseDetectorStatus] =
-    useState("INITIALIZING");
+  const [
+    framesSent,
+    setFramesSent,
+  ] = useState(0);
 
-  const [poseResultStatus, setPoseResultStatus] =
-    useState("NOT RECEIVED");
+  const [
+    poseDetectorStatus,
+    setPoseDetectorStatus,
+  ] = useState(
+    "INITIALIZING"
+  );
 
-  const [poseError, setPoseError] =
-    useState("");
+  const [
+    poseResultStatus,
+    setPoseResultStatus,
+  ] = useState(
+    "NOT RECEIVED"
+  );
 
-  const [frameLoopStatus, setFrameLoopStatus] =
-    useState("NOT RUNNING");
+  const [
+    frameLoopStatus,
+    setFrameLoopStatus,
+  ] = useState(
+    "NOT RUNNING"
+  );
 
-  const [framesSent, setFramesSent] =
-    useState(0);
+  const [
+    getUserMediaError,
+    setGetUserMediaError,
+  ] = useState("");
 
-  const [lastPoseResultTimestamp, setLastPoseResultTimestamp] =
-    useState(null);
+  /* ============================================================
+     REFS
+  ============================================================ */
 
-  // Mobile camera diagnostics
-  const [cameraPermissionState, setCameraPermissionState] =
-    useState("UNKNOWN");
+  const videoRef =
+    useRef(null);
 
-  const [getUserMediaError, setGetUserMediaError] =
-    useState("");
+  const streamRef =
+    useRef(null);
 
-  const [debugSnapshot, setDebugSnapshot] =
-    useState({
-      camera: "idle",
-      video: "NOT READY",
-      poseDetector: "INITIALIZING",
-      poseInference: "NOT RECEIVING",
-      landmarks: 0,
-      analyzer: "INACTIVE",
-      metrics: "INACTIVE",
-      frameLoop: "NOT RUNNING",
-      framesSent: 0,
-    });
-
-  const videoRef = useRef(null);
-
-  const streamRef = useRef(null);
-
-  // Prevent duplicate getUserMedia calls
-  const cameraStartPromiseRef = useRef(null);
-
-  const poseDetectorRef = useRef(null);
+  const poseDetectorRef =
+    useRef(null);
 
   const animationFrameRef =
     useRef(null);
 
+  const cameraStartPromiseRef =
+    useRef(null);
+
   const cameraActiveRef =
+    useRef(false);
+
+  const inferenceRunningRef =
     useRef(false);
 
   const frameCounterRef =
@@ -1136,10 +1453,7 @@ function FormChecker() {
   const lastAnalysisTimeRef =
     useRef(0);
 
-  const lastDebugUpdateRef =
-    useRef(0);
-
-  const lastFrameUpdateRef =
+  const lastUiUpdateRef =
     useRef(0);
 
   const analyzerStateRef =
@@ -1147,26 +1461,122 @@ function FormChecker() {
       phase: "READY",
       repCount: 0,
       lastAngle: null,
-      lastTransition: "READY",
-      lastReason: "Waiting for movement.",
+      lastTransition:
+        "READY",
+      lastReason:
+        "Waiting for movement.",
     });
 
+  /*
+   * Keep latest callback in a ref.
+   *
+   * This prevents the pose detector from holding
+   * an outdated React callback.
+   */
+  const handlePoseResultsRef =
+    useRef(null);
+
+  /* ============================================================
+     RESET EXERCISE
+  ============================================================ */
+
   useEffect(() => {
-    if (
-      !requestedExerciseId ||
-      !isSupportedExercise
-    ) {
-      setCameraStatus("stopped");
-      setPoseStatus("loading");
-      setVideoReady(false);
+    analyzerStateRef.current = {
+      phase: "READY",
+      repCount: 0,
+      lastAngle: null,
+      lastTransition:
+        "READY",
+      lastReason:
+        "Waiting for movement.",
+    };
 
-      setVideoDimensions({
-        width: 0,
-        height: 0,
-      });
+    setAnalysisResult({
+      ...DEFAULT_ANALYSIS,
+      exerciseId:
+        requestedExerciseId,
+    });
 
-      setPoseDetectorStatus(
-        "INITIALIZING"
+    setLandmarks([]);
+
+    setPoseError("");
+
+    setCameraError("");
+
+    setGetUserMediaError("");
+
+    setPoseResultStatus(
+      "NOT RECEIVED"
+    );
+
+    setPoseDetectorStatus(
+      "INITIALIZING"
+    );
+  }, [
+    requestedExerciseId,
+  ]);
+
+  /* ============================================================
+     STOP CAMERA
+  ============================================================ */
+
+  const stopCamera =
+    useCallback(() => {
+      cameraActiveRef.current =
+        false;
+
+      inferenceRunningRef.current =
+        false;
+
+      cameraStartPromiseRef.current =
+        null;
+
+      if (
+        animationFrameRef.current
+      ) {
+        cancelAnimationFrame(
+          animationFrameRef.current
+        );
+
+        animationFrameRef.current =
+          null;
+      }
+
+      if (
+        streamRef.current
+      ) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) => {
+            track.stop();
+          });
+
+        streamRef.current =
+          null;
+      }
+
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+        } catch {}
+
+        videoRef.current.srcObject =
+          null;
+      }
+
+      poseDetectorRef.current =
+        null;
+
+      setCameraStatus(
+        "stopped"
+      );
+
+      setPoseStatus(
+        "loading"
+      );
+
+      setFrameLoopStatus(
+        "NOT RUNNING"
       );
 
       setPoseResultStatus(
@@ -1174,137 +1584,18 @@ function FormChecker() {
       );
 
       setLandmarks([]);
-      setCameraError("");
-      setPoseError("");
 
-      setDebugSnapshot({
-        camera: "stopped",
-        video: "NOT READY",
-        poseDetector: "INITIALIZING",
-        poseInference: "NOT RECEIVING",
-        landmarks: 0,
-        analyzer: "INACTIVE",
-        metrics: "INACTIVE",
+      setVideoReady(false);
+
+      setVideoDimensions({
+        width: 0,
+        height: 0,
       });
+    }, []);
 
-      setAnalysisResult({
-        ...DEFAULT_ANALYSIS,
-        exerciseId:
-          requestedExerciseId,
-        feedback: [
-          "Form Analyzer currently supports Push-Ups and Squats only.",
-        ],
-      });
-
-      return;
-    }
-
-    analyzerStateRef.current = {
-      phase: "READY",
-      repCount: 0,
-      lastAngle: null,
-      lastTransition: "READY",
-      lastReason: "Waiting for movement.",
-    };
-
-    setCameraStatus("idle");
-    setPoseStatus("loading");
-    setVideoReady(false);
-
-    setVideoDimensions({
-      width: 0,
-      height: 0,
-    });
-
-    setPoseDetectorStatus(
-      "INITIALIZING"
-    );
-
-    setPoseResultStatus(
-      "NOT RECEIVED"
-    );
-
-    setLandmarks([]);
-    setCameraError("");
-    setPoseError("");
-    setGetUserMediaError("");
-    setCameraPermissionState("UNKNOWN");
-
-    setDebugSnapshot({
-      camera: "idle",
-      video: "NOT READY",
-      poseDetector: "INITIALIZING",
-      poseInference: "NOT RECEIVING",
-      landmarks: 0,
-      analyzer: "INACTIVE",
-      metrics: "INACTIVE",
-    });
-
-    setAnalysisResult({
-      ...DEFAULT_ANALYSIS,
-      exerciseId:
-        requestedExerciseId,
-      feedback: [
-        "Move into a clear position so I can analyze your form.",
-      ],
-    });
-  }, [
-    requestedExerciseId,
-    isSupportedExercise,
-  ]);
-
-  const stopCamera = useCallback(() => {
-    cameraActiveRef.current = false;
-
-    cameraStartPromiseRef.current = null;
-
-    setFrameLoopStatus("NOT RUNNING");
-
-    setDebugSnapshot((prev) => ({
-      ...prev,
-      frameLoop: "NOT RUNNING",
-      poseInference: "NOT RECEIVING",
-    }));
-
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(
-        animationFrameRef.current
-      );
-
-      animationFrameRef.current = null;
-    }
-
-    if (streamRef.current) {
-      streamRef.current
-        .getTracks()
-        .forEach((track) => track.stop());
-
-      streamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.srcObject = null;
-    }
-
-    poseDetectorRef.current = null;
-
-    setLandmarks([]);
-    setVideoReady(false);
-
-    setVideoDimensions({
-      width: 0,
-      height: 0,
-    });
-
-    setVideoReadyState(0);
-    setVideoSrcObjectStatus(
-      "NOT CONNECTED"
-    );
-
-    setCameraStatus("stopped");
-    setPoseStatus("loading");
-  }, []);
+  /* ============================================================
+     CLEANUP
+  ============================================================ */
 
   useEffect(() => {
     return () => {
@@ -1312,723 +1603,542 @@ function FormChecker() {
     };
   }, [stopCamera]);
 
-  const handlePoseResults = useCallback(
-    (results) => {
-      if (!exerciseMeta) return;
+  /* ============================================================
+     POSE RESULT HANDLER
+  ============================================================ */
 
-      const detectedLandmarks =
-        Array.isArray(results?.poseLandmarks)
-          ? results.poseLandmarks
-          : Array.isArray(results?.landmarksArray)
-          ? results.landmarksArray
-          : [];
+  const handlePoseResults =
+    useCallback(
+      (results) => {
+        if (
+          !exerciseMeta ||
+          !cameraActiveRef.current
+        ) {
+          return;
+        }
 
-      const landmarksMap =
-        normalizeLandmarksMap(
-          results?.landmarks ||
-            results?.landmarksArray ||
-            []
-        );
+        const rawLandmarks =
+          extractPoseLandmarks(
+            results
+          );
 
-      const visibleKeys =
-        Object.keys(landmarksMap).filter(
-          (key) =>
-            getPoint(
+        const landmarksMap =
+          normalizeLandmarksMap(
+            rawLandmarks
+          );
+
+        const visibleKeys =
+          Object.keys(
+            landmarksMap
+          ).filter((key) =>
+            isVisible(
+              getPoint(
+                landmarksMap,
+                key
+              )
+            )
+          );
+
+        const actualLandmarkCount =
+          rawLandmarks.length ||
+          visibleKeys.length;
+
+        if (
+          actualLandmarkCount >
+          0
+        ) {
+          setPoseResultStatus(
+            "RECEIVED"
+          );
+
+          setPoseStatus(
+            "DETECTED"
+          );
+
+          setPoseError("");
+
+          setLandmarks(
+            visibleKeys.map(
+              (key) =>
+                landmarksMap[key]
+            )
+          );
+        } else {
+          /*
+           * IMPORTANT:
+           *
+           * Do NOT immediately destroy the previous
+           * analyzer state when one frame is bad.
+           *
+           * Camera pose detection occasionally produces
+           * empty frames on mobile.
+           */
+          setPoseResultStatus(
+            "NOT RECEIVED"
+          );
+
+          setPoseStatus(
+            "NOT DETECTED"
+          );
+
+          return;
+        }
+
+        /*
+         * Throttle analyzer calculations.
+         *
+         * Pose detection can run at 30-60 FPS,
+         * while rep analysis only needs ~10 FPS.
+         */
+        const now =
+          performance.now();
+
+        if (
+          now -
+            lastAnalysisTimeRef.current <
+          100
+        ) {
+          return;
+        }
+
+        lastAnalysisTimeRef.current =
+          now;
+
+        const state =
+          analyzerStateRef.current;
+
+        let next = null;
+
+        /* ========================================================
+           PUSH-UP
+        ======================================================== */
+
+        if (
+          requestedExerciseId ===
+          "push-up"
+        ) {
+          next =
+            buildPushUpAnalysis(
               landmarksMap,
-              key
-            )
-        );
+              state
+            );
 
-      const actualLandmarkCount =
-        detectedLandmarks.length ||
-        visibleKeys.length;
+          analyzerStateRef.current =
+            {
+              phase:
+                next.phase ||
+                state.phase,
+              repCount:
+                next.repCount ??
+                state.repCount,
+              lastAngle:
+                next.currentAngle ??
+                state.lastAngle,
+              lastTransition:
+                next.trace
+                  ?.lastTransition ||
+                state.lastTransition,
+              lastReason:
+                next.repBlockedReason ||
+                next.trace?.why ||
+                state.lastReason,
+            };
 
-      const actualConfidence =
-        Number.isFinite(
-          results?.confidence
-        )
-          ? results.confidence
-          : actualLandmarkCount
-          ? Math.round(
-              (visibleKeys.length /
-                Math.max(
-                  actualLandmarkCount,
-                  1
-                )) *
-                100
-            )
-          : 0;
+          setAnalysisResult({
+            ...next,
+            exerciseId:
+              requestedExerciseId,
+            landmarkCount:
+              actualLandmarkCount,
+            poseDetected: true,
+            confidence:
+              actualLandmarkCount >=
+              10
+                ? 95
+                : 70,
+            wrongExercise: false,
+          });
 
-      setPoseResultStatus(
-        actualLandmarkCount
-          ? "RECEIVED"
-          : "NOT RECEIVED"
-      );
+          return;
+        }
 
-      setPoseStatus(
-        actualLandmarkCount
-          ? "DETECTED"
-          : "NOT DETECTED"
-      );
+        /* ========================================================
+           SQUAT
+        ======================================================== */
 
-      setPoseError("");
+        if (
+          requestedExerciseId ===
+          "squat"
+        ) {
+          next =
+            buildSquatAnalysis(
+              landmarksMap,
+              state
+            );
 
-      if (actualLandmarkCount) {
-        setLastPoseResultTimestamp(
-          Date.now()
-        );
-      }
+          analyzerStateRef.current =
+            {
+              phase:
+                next.phase ||
+                state.phase,
+              repCount:
+                next.repCount ??
+                state.repCount,
+              lastAngle:
+                next.currentAngle ??
+                state.lastAngle,
+              lastTransition:
+                next.trace
+                  ?.lastTransition ||
+                state.lastTransition,
+              lastReason:
+                next.trace?.why ||
+                state.lastReason,
+            };
 
-      if (!actualLandmarkCount) {
-        setLandmarks([]);
+          setAnalysisResult({
+            ...next,
+            exerciseId:
+              requestedExerciseId,
+            landmarkCount:
+              actualLandmarkCount,
+            poseDetected: true,
+            confidence:
+              actualLandmarkCount >=
+              10
+                ? 95
+                : 70,
+          });
 
-        setAnalysisResult({
-          ...DEFAULT_ANALYSIS,
-          exerciseId:
-            requestedExerciseId,
-          feedback: [
-            "Pose: NOT DETECTED",
-          ],
-        });
+          return;
+        }
 
-        return;
-      }
+        /* ========================================================
+           SIT-UP
+        ======================================================== */
 
-      setLandmarks(
-        visibleKeys.map(
-          (key) =>
-            landmarksMap[key]
-        )
-      );
+        if (
+          requestedExerciseId ===
+          "sit-up"
+        ) {
+          const torsoDistance =
+            getTorsoDistance(
+              landmarksMap
+            );
 
-      const now = Date.now();
+          const hipKneeAngle =
+            averageNumbers([
+              getHipAngle(
+                landmarksMap,
+                "left"
+              ),
+              getHipAngle(
+                landmarksMap,
+                "right"
+              ),
+            ]);
 
+          const shoulderY =
+            averageNumbers([
+              getPoint(
+                landmarksMap,
+                "left_shoulder"
+              )?.y,
+              getPoint(
+                landmarksMap,
+                "right_shoulder"
+              )?.y,
+            ]);
+
+          const hipY =
+            averageNumbers([
+              getPoint(
+                landmarksMap,
+                "left_hip"
+              )?.y,
+              getPoint(
+                landmarksMap,
+                "right_hip"
+              )?.y,
+            ]);
+
+          const torsoMetric =
+            shoulderY !== null &&
+            hipY !== null
+              ? Math.abs(
+                  shoulderY -
+                    hipY
+                )
+              : torsoDistance;
+
+          setAnalysisResult({
+            ...DEFAULT_ANALYSIS,
+            exerciseId:
+              "sit-up",
+            poseDetected: true,
+            landmarkCount:
+              actualLandmarkCount,
+            confidence: 90,
+            phase:
+              state.phase,
+            metrics: {
+              torsoDistance:
+                torsoMetric,
+              hipKneeAngle,
+            },
+            repCount:
+              state.repCount,
+            formScore: 80,
+            feedback: [
+              "Sit-up pose detected. Continue controlled movement.",
+            ],
+          });
+
+          return;
+        }
+      },
+      [
+        exerciseMeta,
+        requestedExerciseId,
+      ]
+    );
+
+  /*
+   * Always keep latest callback.
+   */
+  useEffect(() => {
+    handlePoseResultsRef.current =
+      handlePoseResults;
+  }, [
+    handlePoseResults,
+  ]);
+
+  /* ============================================================
+     CREATE POSE DETECTOR
+  ============================================================ */
+
+  const createDetector =
+    useCallback(async () => {
       if (
-        now -
-          lastAnalysisTimeRef.current <
-        350
+        poseDetectorRef.current
       ) {
-        return;
+        return poseDetectorRef.current;
       }
 
-      lastAnalysisTimeRef.current =
-        now;
+      setPoseDetectorStatus(
+        "INITIALIZING"
+      );
 
-      const state =
-        analyzerStateRef.current;
-
-      const base = {
-        exerciseId:
-          requestedExerciseId,
-        poseDetected: true,
-        landmarkCount:
-          actualLandmarkCount,
-        confidence:
-          actualConfidence,
-        phase: state.phase,
-        metrics: {},
-        repCount: state.repCount,
-        formScore: 0,
-        feedback: [
-          "Move into a clear position so I can analyze your form.",
-        ],
-      };
-
-      const movementProfile =
-        classifyMovementPattern(
-          landmarksMap,
-          requestedExerciseId,
-          {
-            lastElbowAngle:
-              typeof state.lastAngle ===
-              "number"
-                ? state.lastAngle
-                : null,
-            lastTorsoDistance: null,
-            lastHipKneeAngle: null,
-            lastKneeDrive: null,
+      /*
+       * Give detector a stable callback.
+       */
+      const detector =
+        await createPoseDetector(
+          (results) => {
+            if (
+              handlePoseResultsRef.current
+            ) {
+              handlePoseResultsRef.current(
+                results
+              );
+            }
           }
         );
 
-      if (
-        exerciseMeta.analyzer ===
-        "push-up"
-      ) {
-        const next =
-          buildPushUpAnalysis(
-            landmarksMap,
-            state
-          );
+      poseDetectorRef.current =
+        detector;
 
-        const pushUpElbow =
-          averageNumbers(
-            [
-              safeNumber(
-                next.metrics
-                  .leftElbowAngle
-              ),
-              safeNumber(
-                next.metrics
-                  .rightElbowAngle
-              ),
-            ].filter(
-              (value) =>
-                value != null
-            )
-          );
+      setPoseDetectorStatus(
+        "READY"
+      );
 
-        if (pushUpElbow == null) {
-          analyzerStateRef.current = {
-            ...state,
-            lastReason:
-              next.repBlockedReason ||
-              "Landmarks unavailable",
-            lastTransition:
-              state.lastTransition ||
-              "READY",
-          };
+      return detector;
+    }, []);
 
-          setAnalysisResult({
-            ...next,
-            confidence:
-              actualConfidence,
-            landmarkCount:
-              actualLandmarkCount,
-            poseDetected: true,
-            feedback: [
-              next.repBlockedReason ||
-                "Landmarks unavailable",
-            ],
-            repBlockedReason:
-              next.repBlockedReason ||
-              "Landmarks unavailable",
-            wrongExercise: false,
-            selectedElbow:
-              next.selectedElbow ||
-              "NONE",
-          });
-
-          return;
-        }
-
-        analyzerStateRef.current = {
-          phase: next.phase,
-          repCount:
-            next.repCount,
-          lastAngle:
-            next.currentAngle,
-          lastTransition:
-            next.trace
-              ?.lastTransition ||
-            state.lastTransition ||
-            "READY",
-          lastReason:
-            next.repBlockedReason ||
-            next.trace?.why ||
-            state.lastReason ||
-            "Waiting for movement.",
-        };
-
-        setAnalysisResult({
-          ...next,
-          confidence:
-            actualConfidence,
-          landmarkCount:
-            actualLandmarkCount,
-          poseDetected: true,
-          movementClassification:
-            movementProfile.movement,
-          movementConfidence:
-            movementProfile.confidence,
-          primaryMetric:
-            movementProfile.primaryMetric,
-          secondaryMetric:
-            movementProfile.secondaryMetric,
-          wrongExercise: false,
-          repBlockedReason:
-            next.repBlockedReason ||
-            null,
-          selectedElbow:
-            next.selectedElbow ||
-            "LEFT",
-        });
-      } else if (
-        exerciseMeta.analyzer ===
-        "squat"
-      ) {
-        const next =
-          buildSquatAnalysis(
-            landmarksMap,
-            state
-          );
-
-        const squatKnee =
-          averageNumbers(
-            [
-              safeNumber(
-                next.metrics
-                  .leftKneeAngle
-              ),
-              safeNumber(
-                next.metrics
-                  .rightKneeAngle
-              ),
-            ].filter(
-              (value) =>
-                value != null
-            )
-          );
-
-        const pushUpElbow =
-          averageNumbers(
-            [
-              safeNumber(
-                getAngle(
-                  getPoint(
-                    landmarksMap,
-                    "left_shoulder"
-                  ),
-                  getPoint(
-                    landmarksMap,
-                    "left_elbow"
-                  ),
-                  getPoint(
-                    landmarksMap,
-                    "left_wrist"
-                  )
-                )
-              ),
-              safeNumber(
-                getAngle(
-                  getPoint(
-                    landmarksMap,
-                    "right_shoulder"
-                  ),
-                  getPoint(
-                    landmarksMap,
-                    "right_elbow"
-                  ),
-                  getPoint(
-                    landmarksMap,
-                    "right_wrist"
-                  )
-                )
-              ),
-            ].filter(
-              (value) =>
-                value != null
-            )
-          );
-
-        const wrongExercise =
-          (pushUpElbow != null &&
-            squatKnee != null &&
-            pushUpElbow < 145 &&
-            squatKnee > 150) ||
-          !movementProfile.valid;
-
-        if (wrongExercise) {
-          analyzerStateRef.current = {
-            ...state,
-            lastReason:
-              "Wrong exercise. Perform a squat.",
-            lastTransition:
-              state.lastTransition ||
-              "READY",
-          };
-
-          setAnalysisResult({
-            ...next,
-            feedback: [
-              "Wrong exercise. Perform a squat.",
-            ],
-            trace: {
-              lastTransition:
-                state.lastTransition ||
-                "READY",
-              why: "The detected movement does not match the squat pattern.",
-            },
-            movementClassification:
-              movementProfile.movement,
-            movementConfidence:
-              movementProfile.confidence,
-            primaryMetric:
-              movementProfile.primaryMetric,
-            secondaryMetric:
-              movementProfile.secondaryMetric,
-            wrongExercise: true,
-          });
-
-          return;
-        }
-
-        analyzerStateRef.current = {
-          phase: next.phase,
-          repCount:
-            next.repCount,
-          lastAngle:
-            next.currentAngle,
-          lastTransition:
-            next.trace
-              ?.lastTransition ||
-            state.lastTransition ||
-            "READY",
-          lastReason:
-            next.trace?.why ||
-            state.lastReason ||
-            "Waiting for movement.",
-        };
-
-        setAnalysisResult({
-          ...next,
-          confidence:
-            actualConfidence,
-          landmarkCount:
-            actualLandmarkCount,
-          poseDetected: true,
-          movementClassification:
-            movementProfile.movement,
-          movementConfidence:
-            movementProfile.confidence,
-          primaryMetric:
-            movementProfile.primaryMetric,
-          secondaryMetric:
-            movementProfile.secondaryMetric,
-          wrongExercise: false,
-        });
-      } else if (
-        exerciseMeta.analyzer ===
-        "sit-up"
-      ) {
-        const torsoDistance =
-          getTorsoHipSpread(
-            landmarksMap
-          );
-
-        const elbowFlexion =
-          getElbowFlexion(
-            landmarksMap
-          );
-
-        const hipKneeAngle =
-          getHipKneeFlexion(
-            landmarksMap
-          );
-
-        const sitUpMovement =
-          classifyMovementPattern(
-            landmarksMap,
-            "sit-up",
-            {
-              lastElbowAngle:
-                elbowFlexion,
-              lastTorsoDistance:
-                torsoDistance,
-              lastHipKneeAngle:
-                hipKneeAngle,
-              lastKneeDrive: null,
-            }
-          );
-
-        const wrongExercise =
-          !sitUpMovement.valid ||
-          (elbowFlexion != null &&
-            elbowFlexion < 150 &&
-            elbowFlexion > 60);
-
-        if (wrongExercise) {
-          analyzerStateRef.current = {
-            ...state,
-            lastReason:
-              "Wrong exercise. Perform a sit-up.",
-            lastTransition:
-              state.lastTransition ||
-              "READY",
-          };
-
-          setAnalysisResult({
-            ...base,
-            exerciseId:
-              requestedExerciseId,
-            poseDetected: true,
-            landmarkCount:
-              actualLandmarkCount,
-            confidence:
-              actualConfidence,
-            feedback: [
-              "Wrong exercise. Perform a sit-up.",
-            ],
-            phase: "READY",
-            movementClassification:
-              sitUpMovement.movement,
-            movementConfidence:
-              sitUpMovement.confidence,
-            primaryMetric:
-              sitUpMovement.primaryMetric,
-            secondaryMetric:
-              sitUpMovement.secondaryMetric,
-            wrongExercise: true,
-          });
-
-          return;
-        }
-
-        const next = {
-          ...base,
-          exerciseId:
-            requestedExerciseId,
-          poseDetected: true,
-          landmarkCount:
-            actualLandmarkCount,
-          confidence:
-            actualConfidence,
-          phase:
-            sitUpMovement.phase,
-          metrics: {
-            torsoDistance,
-            elbowFlexion,
-            hipKneeAngle,
-          },
-          repCount:
-            state.repCount,
-          formScore: 0,
-          feedback: [
-            "Correct sit-up pattern detected.",
-          ],
-          movementClassification:
-            sitUpMovement.movement,
-          movementConfidence:
-            sitUpMovement.confidence,
-          primaryMetric:
-            sitUpMovement.primaryMetric,
-          secondaryMetric:
-            sitUpMovement.secondaryMetric,
-          wrongExercise: false,
-        };
-
-        analyzerStateRef.current = {
-          ...state,
-          phase:
-            sitUpMovement.phase,
-          repCount:
-            state.repCount,
-          lastAngle:
-            sitUpMovement.primaryMetric,
-          lastTransition:
-            sitUpMovement.phase,
-          lastReason:
-            sitUpMovement.movement,
-        };
-
-        setAnalysisResult(next);
-      } else {
-        setAnalysisResult({
-          ...base,
-          feedback: [
-            "Form Analyzer currently supports Push-Ups and Squats only.",
-          ],
-        });
-      }
-
-      const nextDebugSnapshot = {
-        camera: cameraStatus,
-        video: videoReady
-          ? "READY"
-          : "NOT READY",
-        poseDetector:
-          poseDetectorStatus,
-        poseInference:
-          actualLandmarkCount
-            ? "RECEIVING"
-            : "NOT RECEIVING",
-        landmarks:
-          actualLandmarkCount,
-        analyzer:
-          exerciseMeta?.analyzer
-            ? exerciseMeta.analyzer.toUpperCase()
-            : "INACTIVE",
-        metrics:
-          actualLandmarkCount
-            ? "ACTIVE"
-            : "INACTIVE",
-        frameLoop:
-          frameLoopStatus,
-        framesSent:
-          frameCounterRef.current,
-      };
-
-      if (
-        Date.now() -
-          lastDebugUpdateRef.current >
-        400
-      ) {
-        lastDebugUpdateRef.current =
-          Date.now();
-
-        setDebugSnapshot(
-          nextDebugSnapshot
-        );
-      }
-    },
-    [
-      cameraStatus,
-      exerciseMeta,
-      requestedExerciseId,
-      poseDetectorStatus,
-      videoReady,
-      frameLoopStatus,
-    ]
-  );
+  /* ============================================================
+     FRAME PROCESSING
+  ============================================================ */
 
   const startPoseProcessing =
     useCallback(() => {
       if (
         !exerciseMeta ||
-        !videoRef.current ||
-        !navigator.mediaDevices
+        !videoRef.current
       ) {
         return;
       }
 
-      cameraActiveRef.current = true;
+      if (
+        !poseDetectorRef.current
+      ) {
+        return;
+      }
 
-      setFrameLoopStatus("RUNNING");
-
-      setDebugSnapshot((prev) => ({
-        ...prev,
-        frameLoop: "RUNNING",
-        poseInference: "RECEIVING",
-        poseDetector: "READY",
-      }));
-
-      const frameLoop = async () => {
-        const currentVideo =
-          videoRef.current;
-
-        const detector =
-          poseDetectorRef.current;
-
+      if (
+        cameraActiveRef.current
+      ) {
+        /*
+         * Already running.
+         */
         if (
-          !cameraActiveRef.current ||
-          !currentVideo ||
-          !detector
+          animationFrameRef.current
         ) {
-          setFrameLoopStatus(
-            "NOT RUNNING"
-          );
           return;
         }
+      }
 
-        const videoReadyToAnalyze =
-          currentVideo.readyState >= 2 &&
-          currentVideo.videoWidth > 0 &&
-          currentVideo.videoHeight > 0 &&
-          currentVideo.srcObject !== null;
+      cameraActiveRef.current =
+        true;
 
-        if (!videoReadyToAnalyze) {
-          animationFrameRef.current =
-            requestAnimationFrame(
-              frameLoop
-            );
+      setFrameLoopStatus(
+        "RUNNING"
+      );
 
-          return;
-        }
-
-        try {
-          frameCounterRef.current += 1;
-
+      const processFrame =
+        async () => {
           if (
-            Date.now() -
-              lastFrameUpdateRef.current >
-            400
+            !cameraActiveRef.current
           ) {
-            lastFrameUpdateRef.current =
-              Date.now();
+            animationFrameRef.current =
+              null;
 
-            setFramesSent(
-              frameCounterRef.current
-            );
-
-            setDebugSnapshot((prev) => ({
-              ...prev,
-              frameLoop: "RUNNING",
-              video: "READY",
-              poseInference:
-                "RECEIVING",
-              framesSent:
-                frameCounterRef.current,
-              landmarks:
-                landmarks.length ||
-                prev.landmarks,
-            }));
+            return;
           }
 
-          setPoseDetectorStatus(
-            "READY"
-          );
+          const video =
+            videoRef.current;
 
-          setPoseStatus(
-            "detecting"
-          );
+          const detector =
+            poseDetectorRef.current;
 
-          await detector.send({
-            image: currentVideo,
-          });
-        } catch (error) {
-          setPoseDetectorStatus(
-            "ERROR"
-          );
+          if (
+            !video ||
+            !detector
+          ) {
+            animationFrameRef.current =
+              requestAnimationFrame(
+                processFrame
+              );
 
-          setPoseError(
-            `${error?.name || "PoseInferenceError"}: ${
-              error?.message ||
-              "Unknown pose inference error"
-            }`
-          );
+            return;
+          }
 
-          setCameraError(
-            getCameraErrorMessage(
-              error
-            )
-          );
+          const ready =
+            video.readyState >=
+              2 &&
+            video.videoWidth >
+              0 &&
+            video.videoHeight >
+              0 &&
+            video.srcObject;
 
-          setPoseStatus("error");
-          setFrameLoopStatus(
-            "NOT RUNNING"
-          );
+          if (!ready) {
+            animationFrameRef.current =
+              requestAnimationFrame(
+                processFrame
+              );
 
-          return;
-        }
+            return;
+          }
 
-        animationFrameRef.current =
-          requestAnimationFrame(
-            frameLoop
-          );
-      };
+          /*
+           * CRITICAL:
+           *
+           * Do not send a second frame to MediaPipe
+           * while the previous frame is still processing.
+           *
+           * This prevents mobile flickering and
+           * inference backlog.
+           */
+          if (
+            !inferenceRunningRef.current
+          ) {
+            inferenceRunningRef.current =
+              true;
+
+            frameCounterRef.current +=
+              1;
+
+            try {
+              await detector.send({
+                image: video,
+              });
+
+              if (
+                frameCounterRef.current %
+                  10 ===
+                0
+              ) {
+                setFramesSent(
+                  frameCounterRef.current
+                );
+              }
+            } catch (error) {
+              console.error(
+                "Pose inference error:",
+                error
+              );
+
+              setPoseDetectorStatus(
+                "ERROR"
+              );
+
+              setPoseStatus(
+                "error"
+              );
+
+              setPoseError(
+                `${
+                  error?.name ||
+                  "PoseInferenceError"
+                }: ${
+                  error?.message ||
+                  "Pose inference failed."
+                }`
+              );
+            } finally {
+              inferenceRunningRef.current =
+                false;
+            }
+          }
+
+          if (
+            cameraActiveRef.current
+          ) {
+            animationFrameRef.current =
+              requestAnimationFrame(
+                processFrame
+              );
+          } else {
+            animationFrameRef.current =
+              null;
+          }
+        };
 
       animationFrameRef.current =
         requestAnimationFrame(
-          frameLoop
+          processFrame
         );
-    }, [exerciseMeta, landmarks.length]);
+    }, [
+      exerciseMeta,
+    ]);
 
-  /*
-   * ============================================================
-   * MOBILE-SAFE CAMERA INITIALIZATION
-   * ============================================================
-   *
-   * Analyzer logic is not changed below.
-   */
-  const startCamera = useCallback(
-    async () => {
-      if (!exerciseMeta) return;
+  /* ============================================================
+     START CAMERA
+  ============================================================ */
 
-      // Prevent duplicate getUserMedia calls.
-      if (cameraStartPromiseRef.current) {
+  const startCamera =
+    useCallback(async () => {
+      if (!exerciseMeta) {
+        return;
+      }
+
+      if (
+        cameraStartPromiseRef.current
+      ) {
         return cameraStartPromiseRef.current;
       }
 
-      // Already running.
       if (
         streamRef.current &&
         cameraActiveRef.current
@@ -2036,314 +2146,239 @@ function FormChecker() {
         return;
       }
 
-      const startPromise =
+      const promise =
         (async () => {
-          setCameraStatus("starting");
-          setCameraError("");
-          setGetUserMediaError("");
-          setPoseStatus("loading");
-
-          /*
-           * Check camera API support before
-           * calling getUserMedia.
-           */
-          if (
-            typeof navigator ===
-              "undefined" ||
-            !navigator.mediaDevices ||
-            typeof navigator.mediaDevices
-              .getUserMedia !==
-              "function"
-          ) {
-            setCameraStatus(
-              "error"
-            );
-
-            setCameraError(
-              "Your browser does not support camera access."
-            );
-
-            setGetUserMediaError(
-              "navigator.mediaDevices.getUserMedia is unavailable."
-            );
-
-            return;
-          }
-
-          /*
-           * Camera permission diagnostic.
-           * Permissions API is optional, so failure
-           * here does not prevent camera startup.
-           */
           try {
-            if (
-              navigator.permissions?.query
-            ) {
-              const permission =
-                await navigator.permissions.query(
-                  {
-                    name: "camera",
-                  }
-                );
-
-              setCameraPermissionState(
-                permission.state
-              );
-
-              permission.onchange =
-                () => {
-                  setCameraPermissionState(
-                    permission.state
-                  );
-                };
-            }
-          } catch {
-            setCameraPermissionState(
-              "UNKNOWN"
-            );
-          }
-
-          /*
-           * The video element must already
-           * be mounted.
-           */
-          const video =
-            videoRef.current;
-
-          if (!video) {
             setCameraStatus(
-              "error"
+              "starting"
             );
 
-            setCameraError(
-              "Unable to start video preview."
+            setCameraError("");
+
+            setPoseError("");
+
+            setGetUserMediaError("");
+
+            setPoseStatus(
+              "loading"
             );
 
-            setGetUserMediaError(
-              "Video element is not mounted."
-            );
-
-            return;
-          }
-
-          /*
-           * Mobile-safe video properties.
-           */
-          video.autoplay = true;
-          video.playsInline = true;
-          video.muted = true;
-
-          let stream = null;
-
-          try {
             /*
-             * Prefer rear/environment camera.
-             *
-             * "ideal" is intentionally used so that
-             * the browser can fall back to another
-             * available camera.
+             * Camera API check.
              */
-            const cameraConstraints = {
-              video: {
-                facingMode: {
-                  ideal: "environment",
-                },
-                width: {
-                  ideal: 1280,
-                },
-                height: {
-                  ideal: 720,
-                },
-              },
-              audio: false,
-            };
+            if (
+              !navigator.mediaDevices ||
+              typeof navigator
+                .mediaDevices
+                .getUserMedia !==
+                "function"
+            ) {
+              throw new Error(
+                "Camera API unavailable. Use HTTPS or localhost."
+              );
+            }
+
+            /*
+             * Permission diagnostic.
+             */
+            try {
+              if (
+                navigator.permissions?.query
+              ) {
+                const permission =
+                  await navigator.permissions.query(
+                    {
+                      name: "camera",
+                    }
+                  );
+
+                setCameraPermissionState(
+                  permission.state
+                );
+              }
+            } catch {
+              setCameraPermissionState(
+                "UNKNOWN"
+              );
+            }
+
+            const video =
+              videoRef.current;
+
+            if (!video) {
+              throw new Error(
+                "Video element is not mounted."
+              );
+            }
+
+            /*
+             * Mobile video configuration.
+             */
+            video.autoplay =
+              true;
+
+            video.muted =
+              true;
+
+            video.playsInline =
+              true;
+
+            video.setAttribute(
+              "autoplay",
+              ""
+            );
+
+            video.setAttribute(
+              "muted",
+              ""
+            );
+
+            video.setAttribute(
+              "playsinline",
+              ""
+            );
+
+            /*
+             * REAR CAMERA
+             *
+             * Environment camera is preferred.
+             *
+             * The important part is `ideal`, not
+             * `exact`, because some Android devices
+             * reject exact environment constraints.
+             */
+            let stream;
 
             try {
               stream =
                 await navigator.mediaDevices.getUserMedia(
-                  cameraConstraints
+                  {
+                    audio: false,
+                    video: {
+                      facingMode: {
+                        ideal:
+                          "environment",
+                      },
+                      width: {
+                        ideal: 1280,
+                      },
+                      height: {
+                        ideal: 720,
+                      },
+                      frameRate: {
+                        ideal: 30,
+                        max: 30,
+                      },
+                    },
+                  }
                 );
-            } catch (error) {
+            } catch (firstError) {
+              console.warn(
+                "Preferred camera failed. Retrying generic camera.",
+                firstError
+              );
+
               /*
-               * If the preferred configuration cannot
-               * be satisfied, request any available
-               * video camera.
+               * Fallback for devices/browsers
+               * that reject facingMode.
                */
-              if (
-                error?.name ===
-                  "OverconstrainedError" ||
-                error?.name ===
-                  "ConstraintNotSatisfiedError"
-              ) {
-                stream =
-                  await navigator.mediaDevices.getUserMedia(
-                    {
-                      video: true,
-                      audio: false,
-                    }
-                  );
-              } else {
-                throw error;
-              }
+              stream =
+                await navigator.mediaDevices.getUserMedia(
+                  {
+                    audio: false,
+                    video: true,
+                  }
+                );
+            }
+
+            /*
+             * Verify stream.
+             */
+            if (!stream) {
+              throw new Error(
+                "No camera stream returned."
+              );
             }
 
             streamRef.current =
               stream;
 
             /*
-             * Make sure the video element
-             * still exists.
+             * Verify actual camera track.
              */
-            if (!videoRef.current) {
-              stream
-                .getTracks()
-                .forEach((track) =>
-                  track.stop()
-                );
+            const videoTrack =
+              stream.getVideoTracks()[0];
 
-              streamRef.current =
-                null;
-
-              setCameraStatus(
-                "error"
+            if (!videoTrack) {
+              throw new Error(
+                "Camera stream contains no video track."
               );
-
-              setCameraError(
-                "Unable to start video preview."
-              );
-
-              setGetUserMediaError(
-                "Video element disappeared before stream assignment."
-              );
-
-              return;
             }
 
-            const currentVideo =
-              videoRef.current;
-
-            currentVideo.autoplay =
-              true;
-
-            currentVideo.playsInline =
-              true;
-
-            currentVideo.muted =
-              true;
-
-            /*
-             * Attach MediaStream to video.
-             */
-            currentVideo.srcObject =
-              stream;
-
-            setVideoElementStatus(
-              "FOUND"
+            console.log(
+              "Camera track:",
+              videoTrack.getSettings()
             );
 
-            setVideoSrcObjectStatus(
-              currentVideo.srcObject
-                ? "CONNECTED"
-                : "NOT CONNECTED"
+            /*
+             * Attach stream.
+             */
+            video.srcObject =
+              stream;
+
+            /*
+             * IMPORTANT:
+             *
+             * Rear camera must NOT be mirrored.
+             */
+            video.style.transform =
+              "none";
+
+            video.style.webkitTransform =
+              "none";
+
+            /*
+             * Wait for dimensions.
+             */
+            await waitForVideo(
+              video
+            );
+
+            /*
+             * Explicit mobile play.
+             */
+            await video.play();
+
+            const width =
+              video.videoWidth;
+
+            const height =
+              video.videoHeight;
+
+            if (
+              width <= 0 ||
+              height <= 0
+            ) {
+              throw new Error(
+                "Camera started but video dimensions are invalid."
+              );
+            }
+
+            setVideoDimensions({
+              width,
+              height,
+            });
+
+            setVideoReady(
+              true
             );
 
             setCameraPermissionState(
               "granted"
             );
 
-            setGetUserMediaError(
-              ""
-            );
-
             /*
-             * Wait until browser has usable
-             * video metadata.
-             */
-            await waitForVideo(
-              currentVideo
-            );
-
-            const nextVideoWidth =
-              currentVideo.videoWidth ||
-              0;
-
-            const nextVideoHeight =
-              currentVideo.videoHeight ||
-              0;
-
-            setVideoReady(
-              nextVideoWidth > 0 &&
-                nextVideoHeight > 0
-            );
-
-            setVideoDimensions({
-              width: nextVideoWidth,
-              height: nextVideoHeight,
-            });
-
-            setVideoReadyState(
-              currentVideo.readyState ||
-                0
-            );
-
-            setVideoElementStatus(
-              "FOUND"
-            );
-
-            setVideoSrcObjectStatus(
-              currentVideo.srcObject
-                ? "CONNECTED"
-                : "NOT CONNECTED"
-            );
-
-            /*
-             * Explicitly call play().
-             *
-             * This is important for mobile browsers.
-             */
-            try {
-              await currentVideo.play();
-            } catch (playError) {
-              console.error(
-                "Video playback failed:",
-                playError
-              );
-
-              setCameraStatus(
-                "error"
-              );
-
-              setCameraError(
-                "Unable to start video preview."
-              );
-
-              setGetUserMediaError(
-                `${
-                  playError?.name ||
-                  "PlaybackError"
-                }: ${
-                  playError?.message ||
-                  "Video playback failed."
-                }`
-              );
-
-              stream
-                .getTracks()
-                .forEach((track) =>
-                  track.stop()
-                );
-
-              streamRef.current =
-                null;
-
-              currentVideo.srcObject =
-                null;
-
-              return;
-            }
-
-            /*
-             * Camera and video are actually ready.
+             * Camera is now REALLY active.
              */
             cameraActiveRef.current =
               true;
@@ -2356,99 +2391,48 @@ function FormChecker() {
               "detecting"
             );
 
-            setDebugSnapshot({
-              camera: "active",
-              video:
-                nextVideoWidth > 0 &&
-                nextVideoHeight > 0
-                  ? "READY"
-                  : "NOT READY",
-              poseDetector:
-                "INITIALIZING",
-              poseInference:
-                "NOT RECEIVING",
-              landmarks: 0,
-              analyzer:
-                exerciseMeta?.analyzer
-                  ? exerciseMeta.analyzer.toUpperCase()
-                  : "INACTIVE",
-              metrics: "INACTIVE",
-              frameLoop: "RUNNING",
-              framesSent: 0,
-            });
-
             /*
-             * Existing pose detector pipeline.
-             * DO NOT change analyzer logic.
+             * Initialize pose detector AFTER
+             * video is ready.
              */
-            if (
-              !poseDetectorRef.current
-            ) {
-              setPoseDetectorStatus(
-                "INITIALIZING"
-              );
-
-              try {
-                poseDetectorRef.current =
-                  await createPoseDetector(
-                    handlePoseResults
-                  );
-
-                setPoseDetectorStatus(
-                  "READY"
-                );
-
-                setPoseError("");
-              } catch (error) {
-                setPoseDetectorStatus(
-                  "ERROR"
-                );
-
-                setPoseError(
-                  `${
-                    error?.name ||
-                    "PoseDetectorError"
-                  }: ${
-                    error?.message ||
-                    "Unknown pose detector initialization error"
-                  }`
-                );
-
-                setPoseStatus(
-                  "error"
-                );
-
-                setCameraError(
-                  "Unable to initialize pose detection."
-                );
-
-                return;
-              }
-            }
+            await createDetector();
 
             /*
-             * Existing analyzer processing pipeline.
+             * Start inference.
              */
             startPoseProcessing();
           } catch (error) {
             console.error(
-              "Camera initialization error:",
+              "Camera startup error:",
               error
             );
 
-            if (stream) {
-              stream
-                .getTracks()
-                .forEach((track) =>
-                  track.stop()
-                );
-            }
-
-            streamRef.current =
-              null;
-
             cameraActiveRef.current =
               false;
+
+            inferenceRunningRef.current =
+              false;
+
+            if (
+              streamRef.current
+            ) {
+              streamRef.current
+                .getTracks()
+                .forEach(
+                  (track) =>
+                    track.stop()
+                );
+
+              streamRef.current =
+                null;
+            }
+
+            if (
+              videoRef.current
+            ) {
+              videoRef.current.srcObject =
+                null;
+            }
 
             setCameraStatus(
               "error"
@@ -2458,92 +2442,90 @@ function FormChecker() {
               "error"
             );
 
-            setGetUserMediaError(
-              `${
-                error?.name ||
-                "UnknownError"
-              }: ${
-                error?.message ||
-                "Unknown camera error."
-              }`
-            );
-
             setCameraError(
               getCameraErrorMessage(
                 error
               )
             );
+
+            setGetUserMediaError(
+              `${
+                error?.name ||
+                "CameraError"
+              }: ${
+                error?.message ||
+                "Unknown camera error."
+              }`
+            );
           }
         })();
 
       cameraStartPromiseRef.current =
-        startPromise;
+        promise;
 
       try {
-        await startPromise;
+        await promise;
       } finally {
         cameraStartPromiseRef.current =
           null;
       }
-    },
-    [
+    }, [
       exerciseMeta,
-      handlePoseResults,
+      createDetector,
       startPoseProcessing,
-    ]
-  );
+    ]);
 
-  const activeExerciseName =
-    exerciseMeta?.name ||
-    "Unsupported exercise";
+  /* ============================================================
+     FEEDBACK UI
+  ============================================================ */
 
-  const feedbackList = useMemo(() => {
-    const items =
-      Array.isArray(
-        analysisResult?.feedback
-      )
-        ? analysisResult.feedback
-        : [
-            "Move into a clear position so I can analyze your form.",
-          ];
+  const feedbackList =
+    useMemo(() => {
+      const items =
+        Array.isArray(
+          analysisResult.feedback
+        )
+          ? analysisResult.feedback
+          : [
+              "Move into a clear position so I can analyze your form.",
+            ];
 
-    return items.map(
-      (item, index) => {
-        const value =
-          typeof item === "string" &&
-          item.trim()
-            ? item
-            : "No feedback available.";
+      return items.map(
+        (item, index) => {
+          const value =
+            typeof item ===
+              "string" &&
+            item.trim()
+              ? item
+              : "No feedback available.";
 
-        return (
-          <div
-            key={`${value}-${index}`}
-            style={{
-              padding:
-                "12px 14px",
-              borderRadius:
-                "14px",
-              background:
-                "rgba(255,255,255,0.04)",
-              color:
-                value.startsWith("✅")
-                  ? "#9ee7ff"
-                  : "#fbbf24",
-            }}
-          >
-            {value}
-          </div>
-        );
-      }
-    );
-  }, [analysisResult]);
+          return (
+            <div
+              key={`${value}-${index}`}
+              style={{
+                padding:
+                  "12px 14px",
+                borderRadius:
+                  "14px",
+                background:
+                  "rgba(255,255,255,0.04)",
+                color:
+                  "#dcecff",
+              }}
+            >
+              {value}
+            </div>
+          );
+        }
+      );
+    }, [
+      analysisResult.feedback,
+    ]);
 
-  /*
-   * DEV-only diagnostics.
-   *
-   * These values are calculated only for the
-   * development diagnostic section below.
-   */
+  /* ============================================================
+     DEBUG INFO
+  ============================================================ */
+
   const isMobile =
     typeof navigator !==
       "undefined" &&
@@ -2558,73 +2540,82 @@ function FormChecker() {
       : "UNKNOWN";
 
   const mediaDevicesAvailable =
-    typeof navigator !==
-      "undefined" &&
     Boolean(
-      navigator.mediaDevices
+      navigator?.mediaDevices
     );
 
   const getUserMediaAvailable =
     mediaDevicesAvailable &&
-    typeof navigator.mediaDevices
+    typeof navigator
+      .mediaDevices
       .getUserMedia ===
       "function";
+
+  /* ============================================================
+     RENDER
+  ============================================================ */
 
   return (
     <div
       style={{
         minHeight: "100vh",
         background:
-          "linear-gradient(180deg, #050b18 0%, #0d172a 100%)",
+          "linear-gradient(180deg,#050b18 0%,#0d172a 100%)",
         color: "#edf6ff",
-        padding: "32px 20px",
+        padding:
+          "32px 20px",
       }}
     >
       <div
         style={{
-          maxWidth: "1100px",
-          margin: "0 auto",
-          display: "grid",
-          gap: "24px",
+          maxWidth:
+            "1100px",
+          margin:
+            "0 auto",
+          display:
+            "grid",
+          gap:
+            "24px",
         }}
       >
+        {/* HEADER */}
+
         <div
           style={{
-            display: "flex",
-            alignItems: "center",
+            display:
+              "flex",
+            alignItems:
+              "center",
             justifyContent:
               "space-between",
-            gap: "16px",
+            gap:
+              "16px",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-            }}
-          >
+          <div>
             <div
               style={{
-                fontSize: "1.8rem",
+                fontWeight:
+                  800,
+                letterSpacing:
+                  "0.14em",
+                color:
+                  "#8fe7ff",
               }}
             >
-              ⚡
+              ⚡ AI FORM ANALYZER
             </div>
 
-            <div>
-              <div
-                style={{
-                  fontWeight: 800,
-                  letterSpacing:
-                    "0.14em",
-                  textTransform:
-                    "uppercase",
-                  color: "#8fe7ff",
-                }}
-              >
-                AI FORM ANALYZER
-              </div>
+            <div
+              style={{
+                marginTop:
+                  "6px",
+                color:
+                  "#96a0b8",
+              }}
+            >
+              {exerciseMeta?.name ||
+                "Exercise"}
             </div>
           </div>
 
@@ -2638,12 +2629,14 @@ function FormChecker() {
                 "rgba(255,255,255,0.06)",
               border:
                 "1px solid rgba(255,255,255,0.1)",
-              color: "#edf6ff",
+              color:
+                "#edf6ff",
               padding:
                 "10px 16px",
               borderRadius:
                 "12px",
-              cursor: "pointer",
+              cursor:
+                "pointer",
             }}
           >
             Back
@@ -2653,82 +2646,73 @@ function FormChecker() {
         {!isSupportedExercise ? (
           <div
             style={{
-              border:
-                "1px solid rgba(255,255,255,0.1)",
-              background:
-                "rgba(17,24,39,0.9)",
+              padding:
+                "24px",
               borderRadius:
                 "20px",
-              padding: "24px",
+              background:
+                "rgba(17,24,39,.9)",
             }}
           >
-            <h2
-              style={{
-                margin:
-                  "0 0 12px",
-                color: "#f8fafc",
-              }}
-            >
-              AI Form Analyzer
-            </h2>
-
-            <p
-              style={{
-                margin: 0,
-                color: "#fbbf24",
-              }}
-            >
-              Form Analyzer currently
-              supports Push-Ups and Squats
-              only.
-            </p>
+            Unsupported exercise.
           </div>
         ) : (
           <>
+            {/* MAIN GRID */}
+
             <div
               style={{
-                display: "grid",
-                gap: "20px",
+                display:
+                  "grid",
                 gridTemplateColumns:
-                  "1.5fr 0.9fr",
+                  "1.5fr .9fr",
+                gap:
+                  "20px",
                 alignItems:
                   "start",
               }}
             >
+              {/* CAMERA */}
+
               <div
                 style={{
-                  border:
-                    "1px solid rgba(255,255,255,0.1)",
                   background:
-                    "rgba(17,24,39,0.9)",
+                    "rgba(17,24,39,.9)",
+                  border:
+                    "1px solid rgba(255,255,255,.1)",
                   borderRadius:
                     "22px",
-                  padding: "18px",
-                  display: "grid",
-                  gap: "18px",
+                  padding:
+                    "18px",
+                  display:
+                    "grid",
+                  gap:
+                    "18px",
                 }}
               >
                 <div
                   style={{
-                    display: "flex",
+                    display:
+                      "flex",
                     alignItems:
                       "center",
                     justifyContent:
                       "space-between",
-                    gap: "12px",
+                    gap:
+                      "12px",
                   }}
                 >
                   <div>
                     <div
                       style={{
-                        color:
-                          "#96a0b8",
+                        fontSize:
+                          ".72rem",
                         textTransform:
                           "uppercase",
+                        color:
+                          "#96a0b8",
                         letterSpacing:
-                          "0.14em",
-                        fontSize:
-                          "0.72rem",
+                          ".14em",
                       }}
                     >
                       Exercise
@@ -2738,14 +2722,10 @@ function FormChecker() {
                       style={{
                         margin:
                           "6px 0 0",
-                        color:
-                          "#f8fafc",
-                        fontSize:
-                          "2rem",
                       }}
                     >
                       {
-                        activeExerciseName
+                        exerciseMeta.name
                       }
                     </h2>
                   </div>
@@ -2762,19 +2742,21 @@ function FormChecker() {
                       background:
                         cameraStatus ===
                         "active"
-                          ? "rgba(255,87,87,0.2)"
-                          : "linear-gradient(135deg, #0fffc1, #3d8dff)",
-                      border: "none",
+                          ? "rgba(255,70,70,.2)"
+                          : "linear-gradient(135deg,#0fffc1,#3d8dff)",
+                      border:
+                        "none",
                       color:
                         cameraStatus ===
                         "active"
                           ? "#fff"
                           : "#050a17",
-                      borderRadius:
-                        "12px",
                       padding:
                         "12px 18px",
-                      fontWeight: 700,
+                      borderRadius:
+                        "12px",
+                      fontWeight:
+                        700,
                       cursor:
                         "pointer",
                     }}
@@ -2789,103 +2771,125 @@ function FormChecker() {
                   </button>
                 </div>
 
+                {/* VIDEO */}
+
                 <div
                   style={{
                     position:
                       "relative",
+                    width:
+                      "100%",
+                    aspectRatio:
+                      "16 / 9",
                     background:
                       "#000",
                     borderRadius:
                       "18px",
                     overflow:
                       "hidden",
-                    aspectRatio:
-                      "16 / 9",
                     border:
-                      "1px solid rgba(255,255,255,0.1)",
+                      "1px solid rgba(255,255,255,.1)",
                   }}
                 >
                   <video
-                    ref={videoRef}
-                    playsInline
-                    muted
+                    ref={
+                      videoRef
+                    }
                     autoPlay
+                    muted
+                    playsInline
                     style={{
-                      width: "100%",
-                      height: "100%",
+                      width:
+                        "100%",
+                      height:
+                        "100%",
                       objectFit:
                         "cover",
+
+                      /*
+                       * IMPORTANT:
+                       * Do NOT mirror rear camera.
+                       */
+                      transform:
+                        "none",
+
+                      WebkitTransform:
+                        "none",
+
                       display:
                         "block",
                     }}
                   />
 
-                  {!cameraError &&
-                    cameraStatus !==
-                      "active" && (
-                      <div
-                        style={{
-                          position:
-                            "absolute",
-                          inset: 0,
-                          display:
-                            "flex",
-                          alignItems:
-                            "center",
-                          justifyContent:
-                            "center",
-                          background:
-                            "rgba(0,0,0,0.4)",
-                          color:
-                            "#d7ebff",
-                          fontSize:
-                            "1rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        {cameraStatus ===
-                        "starting"
-                          ? "Starting camera..."
-                          : "Camera is idle."}
-                      </div>
-                    )}
+                  {!videoReady && (
+                    <div
+                      style={{
+                        position:
+                          "absolute",
+                        inset:
+                          0,
+                        display:
+                          "flex",
+                        alignItems:
+                          "center",
+                        justifyContent:
+                          "center",
+                        background:
+                          "rgba(0,0,0,.45)",
+                        color:
+                          "#d7ebff",
+                      }}
+                    >
+                      {cameraStatus ===
+                      "starting"
+                        ? "Starting camera..."
+                        : "Camera ready when you are."}
+                    </div>
+                  )}
                 </div>
 
-                {cameraError ? (
+                {cameraError && (
                   <div
                     style={{
                       padding:
                         "14px 16px",
-                      background:
-                        "rgba(255, 87, 87, 0.12)",
-                      border:
-                        "1px solid rgba(255, 87, 87, 0.35)",
-                      color:
-                        "#ffd7d7",
                       borderRadius:
                         "14px",
+                      background:
+                        "rgba(255,70,70,.12)",
+                      border:
+                        "1px solid rgba(255,70,70,.3)",
+                      color:
+                        "#ffd7d7",
                     }}
                   >
                     {cameraError}
                   </div>
-                ) : null}
+                )}
               </div>
+
+              {/* RIGHT PANEL */}
 
               <div
                 style={{
-                  display: "grid",
-                  gap: "18px",
+                  display:
+                    "grid",
+                  gap:
+                    "18px",
                 }}
               >
+                {/* SCORE */}
+
                 <div
                   style={{
-                    border:
-                      "1px solid rgba(255,255,255,0.1)",
                     background:
-                      "rgba(17,24,39,0.9)",
+                      "rgba(17,24,39,.9)",
+                    border:
+                      "1px solid rgba(255,255,255,.1)",
                     borderRadius:
                       "20px",
-                    padding: "22px",
+                    padding:
+                      "22px",
                   }}
                 >
                   <div
@@ -2895,9 +2899,9 @@ function FormChecker() {
                       textTransform:
                         "uppercase",
                       letterSpacing:
-                        "0.12em",
+                        ".12em",
                       fontSize:
-                        "0.72rem",
+                        ".72rem",
                     }}
                   >
                     Form Score
@@ -2911,30 +2915,28 @@ function FormChecker() {
                         "3rem",
                       fontWeight:
                         800,
-                      color:
-                        "#f8fafc",
                     }}
                   >
-                    {Number.isFinite(
-                      analysisResult.formScore
-                    )
-                      ? Math.round(
-                          analysisResult.formScore
-                        )
-                      : "N/A"}
+                    {Math.round(
+                      analysisResult.formScore ||
+                        0
+                    )}
                     %
                   </div>
                 </div>
 
+                {/* REPS */}
+
                 <div
                   style={{
-                    border:
-                      "1px solid rgba(255,255,255,0.1)",
                     background:
-                      "rgba(17,24,39,0.9)",
+                      "rgba(17,24,39,.9)",
+                    border:
+                      "1px solid rgba(255,255,255,.1)",
                     borderRadius:
                       "20px",
-                    padding: "22px",
+                    padding:
+                      "22px",
                   }}
                 >
                   <div
@@ -2944,9 +2946,9 @@ function FormChecker() {
                       textTransform:
                         "uppercase",
                       letterSpacing:
-                        "0.12em",
+                        ".12em",
                       fontSize:
-                        "0.72rem",
+                        ".72rem",
                     }}
                   >
                     Repetitions
@@ -2957,27 +2959,28 @@ function FormChecker() {
                       marginTop:
                         "12px",
                       fontSize:
-                        "2.5rem",
+                        "2.8rem",
                       fontWeight:
                         800,
-                      color:
-                        "#f8fafc",
                     }}
                   >
-                    {analysisResult.repCount ??
+                    {analysisResult.repCount ||
                       0}
                   </div>
                 </div>
 
+                {/* STATUS */}
+
                 <div
                   style={{
-                    border:
-                      "1px solid rgba(255,255,255,0.1)",
                     background:
-                      "rgba(17,24,39,0.9)",
+                      "rgba(17,24,39,.9)",
+                    border:
+                      "1px solid rgba(255,255,255,.1)",
                     borderRadius:
                       "20px",
-                    padding: "22px",
+                    padding:
+                      "22px",
                   }}
                 >
                   <div
@@ -2987,12 +2990,12 @@ function FormChecker() {
                       textTransform:
                         "uppercase",
                       letterSpacing:
-                        "0.12em",
+                        ".12em",
                       fontSize:
-                        "0.72rem",
+                        ".72rem",
                     }}
                   >
-                    Status
+                    AI Status
                   </div>
 
                   <div
@@ -3001,51 +3004,64 @@ function FormChecker() {
                         "12px",
                       display:
                         "grid",
-                      gap: "8px",
-                      color:
-                        "#edf6ff",
+                      gap:
+                        "8px",
                     }}
                   >
                     <div>
                       Camera:{" "}
-                      {
-                        cameraStatus
-                      }
+                      <strong>
+                        {
+                          cameraStatus
+                        }
+                      </strong>
                     </div>
 
                     <div>
                       Pose:{" "}
-                      {
-                        poseStatus
-                      }
+                      <strong>
+                        {
+                          poseStatus
+                        }
+                      </strong>
                     </div>
 
                     <div>
                       Landmarks:{" "}
-                      {landmarks.length ||
-                        analysisResult.landmarkCount ||
-                        0}
+                      <strong>
+                        {
+                          analysisResult.landmarkCount ||
+                          0
+                        }
+                      </strong>
                     </div>
 
                     <div>
                       Phase:{" "}
-                      {analysisResult.phase ||
-                        "READY"}
+                      <strong>
+                        {
+                          analysisResult.phase ||
+                          "READY"
+                        }
+                      </strong>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
+            {/* FEEDBACK */}
+
             <div
               style={{
-                border:
-                  "1px solid rgba(255,255,255,0.1)",
                 background:
-                  "rgba(17,24,39,0.9)",
+                  "rgba(17,24,39,.9)",
+                border:
+                  "1px solid rgba(255,255,255,.1)",
                 borderRadius:
                   "20px",
-                padding: "22px",
+                padding:
+                  "22px",
               }}
             >
               <div
@@ -3055,501 +3071,306 @@ function FormChecker() {
                   textTransform:
                     "uppercase",
                   letterSpacing:
-                    "0.12em",
+                    ".12em",
                   fontSize:
-                    "0.72rem",
+                    ".72rem",
                 }}
               >
-                Feedback
+                AI Feedback
               </div>
 
               <div
                 style={{
                   marginTop:
                     "12px",
-                  display:
+                    display:
                     "grid",
-                  gap: "10px",
+                  gap:
+                    "10px",
                 }}
               >
                 {feedbackList}
               </div>
             </div>
 
+            {/* DEBUG */}
+
             {import.meta.env.DEV && (
               <div
                 style={{
-                  border:
-                    "1px solid rgba(255,255,255,0.08)",
                   background:
-                    "rgba(7,12,22,0.95)",
+                    "rgba(4,8,16,.95)",
+                  border:
+                    "1px solid rgba(255,255,255,.08)",
                   borderRadius:
-                    "16px",
-                  padding: "18px",
+                    "18px",
+                  padding:
+                    "20px",
+                  fontSize:
+                    ".86rem",
+                  color:
+                    "#dcecff",
                 }}
               >
                 <div
                   style={{
-                    display:
-                      "flex",
-                    justifyContent:
-                      "space-between",
-                    alignItems:
-                      "center",
+                    color:
+                      "#8fe7ff",
+                    fontWeight:
+                      800,
                     marginBottom:
-                      "10px",
+                      "12px",
                   }}
                 >
+                  DEV AI DIAGNOSTICS
+                </div>
+
+                <div>
+                  Mobile:{" "}
+                  {isMobile
+                    ? "YES"
+                    : "NO"}
+                </div>
+
+                <div>
+                  Camera:{" "}
+                  {
+                    cameraStatus
+                  }
+                </div>
+
+                <div>
+                  Permission:{" "}
+                  {
+                    cameraPermissionState
+                  }
+                </div>
+
+                <div>
+                  MediaDevices:{" "}
+                  {mediaDevicesAvailable
+                    ? "YES"
+                    : "NO"}
+                </div>
+
+                <div>
+                  getUserMedia:{" "}
+                  {getUserMediaAvailable
+                    ? "YES"
+                    : "NO"}
+                </div>
+
+                <div>
+                  Video Ready:{" "}
+                  {videoReady
+                    ? "YES"
+                    : "NO"}
+                </div>
+
+                <div>
+                  Video Size:{" "}
+                  {
+                    videoDimensions.width
+                  }
+                  ×
+                  {
+                    videoDimensions.height
+                  }
+                </div>
+
+                <div>
+                  Pose Detector:{" "}
+                  {
+                    poseDetectorStatus
+                  }
+                </div>
+
+                <div>
+                  Pose Results:{" "}
+                  {
+                    poseResultStatus
+                  }
+                </div>
+
+                <div>
+                  Frame Loop:{" "}
+                  {
+                    frameLoopStatus
+                  }
+                </div>
+
+                <div>
+                  Frames:{" "}
+                  {framesSent}
+                </div>
+
+                <div>
+                  Landmarks:{" "}
+                  {
+                    analysisResult.landmarkCount ||
+                    0
+                  }
+                </div>
+
+                <div>
+                  Confidence:{" "}
+                  {
+                    analysisResult.confidence ||
+                    0
+                  }
+                  %
+                </div>
+
+                <div>
+                  Phase:{" "}
+                  {
+                    analysisResult.phase
+                  }
+                </div>
+
+                <div>
+                  Rep Count:{" "}
+                  {
+                    analysisResult.repCount ||
+                    0
+                  }
+                </div>
+
+                <div>
+                  Current Angle:{" "}
+                  {analysisResult.currentAngle !=
+                  null
+                    ? `${analysisResult.currentAngle.toFixed(
+                        1
+                      )}°`
+                    : "N/A"}
+                </div>
+
+                <div>
+                  Selected Elbow:{" "}
+                  {
+                    analysisResult.selectedElbow ||
+                    "N/A"
+                  }
+                </div>
+
+                <div>
+                  Left Elbow:{" "}
+                  {analysisResult
+                    .metrics
+                    ?.leftElbowAngle !=
+                  null
+                    ? `${analysisResult.metrics.leftElbowAngle.toFixed(
+                        1
+                      )}°`
+                    : "N/A"}
+                </div>
+
+                <div>
+                  Right Elbow:{" "}
+                  {analysisResult
+                    .metrics
+                    ?.rightElbowAngle !=
+                  null
+                    ? `${analysisResult.metrics.rightElbowAngle.toFixed(
+                        1
+                      )}°`
+                    : "N/A"}
+                </div>
+
+                <div>
+                  Left Knee:{" "}
+                  {analysisResult
+                    .metrics
+                    ?.leftKneeAngle !=
+                  null
+                    ? `${analysisResult.metrics.leftKneeAngle.toFixed(
+                        1
+                      )}°`
+                    : "N/A"}
+                </div>
+
+                <div>
+                  Right Knee:{" "}
+                  {analysisResult
+                    .metrics
+                    ?.rightKneeAngle !=
+                  null
+                    ? `${analysisResult.metrics.rightKneeAngle.toFixed(
+                        1
+                      )}°`
+                    : "N/A"}
+                </div>
+
+                <div>
+                  Last Transition:{" "}
+                  {
+                    analysisResult
+                      .trace
+                      ?.lastTransition
+                  }
+                </div>
+
+                <div>
+                  Why:{" "}
+                  {
+                    analysisResult
+                      .trace?.why
+                  }
+                </div>
+
+                <div>
+                  Rep Blocked:{" "}
+                  {
+                    analysisResult
+                      .repBlockedReason ||
+                    "NONE"
+                  }
+                </div>
+
+                {poseError && (
                   <div
                     style={{
                       color:
-                        "#8fe7ff",
-                      fontWeight:
-                        700,
+                        "#ff8b8b",
+                      marginTop:
+                        "10px",
                     }}
                   >
-                    DEV DEBUG
+                    Pose Error:{" "}
+                    {poseError}
                   </div>
+                )}
 
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        if (
-                          navigator.clipboard
-                        ) {
-                          await navigator.clipboard.writeText(
-                            JSON.stringify(
-                              {
-                                exercise:
-                                  activeExerciseName,
-                                cameraStatus,
-                                poseStatus,
-                                landmarks:
-                                  landmarks.length,
-                                analysisResult,
-                                browser,
-                                isMobile,
-                                mediaDevicesAvailable,
-                                getUserMediaAvailable,
-                                cameraPermissionState,
-                                streamCreated:
-                                  Boolean(
-                                    streamRef.current
-                                  ),
-                                videoReadyState:
-                                  videoRef.current?.readyState ??
-                                  videoReadyState,
-                                videoWidth:
-                                  videoRef.current?.videoWidth ??
-                                  videoDimensions.width,
-                                videoHeight:
-                                  videoRef.current?.videoHeight ??
-                                  videoDimensions.height,
-                                getUserMediaError,
-                              },
-                              null,
-                              2
-                            )
-                          );
-                        }
-                      } catch {
-                        // Ignore clipboard errors.
-                      }
-                    }}
+                {getUserMediaError && (
+                  <div
                     style={{
-                      background:
-                        "transparent",
-                      border:
-                        "1px solid rgba(255,255,255,0.08)",
                       color:
-                        "#d8eaff",
-                      borderRadius:
-                        "8px",
-                      padding:
-                        "6px 10px",
-                      cursor:
-                        "pointer",
+                        "#ff8b8b",
+                      marginTop:
+                        "10px",
                     }}
                   >
-                    Copy Debug Snapshot
-                  </button>
-                </div>
+                    Camera Error:{" "}
+                    {
+                      getUserMediaError
+                    }
+                  </div>
+                )}
 
                 <div
                   style={{
-                    display:
-                      "grid",
-                    gap: "8px",
-                    fontSize:
-                      "0.88rem",
+                    marginTop:
+                      "12px",
                     color:
-                      "#dfeaf8",
+                      "#8fa5c2",
+                    wordBreak:
+                      "break-word",
                   }}
                 >
-                  <div>
-                    Browser:{" "}
-                    {browser}
-                  </div>
-
-                  <div>
-                    Mobile:{" "}
-                    {isMobile
-                      ? "YES"
-                      : "NO"}
-                  </div>
-
-                  <div>
-                    navigator.mediaDevices:{" "}
-                    {mediaDevicesAvailable
-                      ? "AVAILABLE"
-                      : "NOT AVAILABLE"}
-                  </div>
-
-                  <div>
-                    getUserMedia:{" "}
-                    {getUserMediaAvailable
-                      ? "AVAILABLE"
-                      : "NOT AVAILABLE"}
-                  </div>
-
-                  <div>
-                    Camera Permission:{" "}
-                    {
-                      cameraPermissionState
-                    }
-                  </div>
-
-                  <div>
-                    Stream Created:{" "}
-                    {streamRef.current
-                      ? "YES"
-                      : "NO"}
-                  </div>
-
-                  <div>
-                    Video Ready State:{" "}
-                    {videoRef.current
-                      ?.readyState ??
-                      videoReadyState}
-                  </div>
-
-                  <div>
-                    Video Width:{" "}
-                    {videoRef.current
-                      ?.videoWidth ??
-                      videoDimensions.width}
-                  </div>
-
-                  <div>
-                    Video Height:{" "}
-                    {videoRef.current
-                      ?.videoHeight ??
-                      videoDimensions.height}
-                  </div>
-
-                  <div>
-                    getUserMedia Error:{" "}
-                    {getUserMediaError ||
-                      "NONE"}
-                  </div>
-
-                  <div>
-                    Selected Exercise:{" "}
-                    {exerciseMeta?.name ||
-                      "UNKNOWN"}
-                  </div>
-
-                  <div>
-                    Selected Elbow:{" "}
-                    {analysisResult.selectedElbow ||
-                      "NONE"}
-                  </div>
-
-                  <div>
-                    Movement Classification:{" "}
-                    {analysisResult.movementClassification ||
-                      "UNKNOWN"}
-                  </div>
-
-                  <div>
-                    Movement Confidence:{" "}
-                    {analysisResult.movementConfidence ??
-                      0}
-                    %
-                  </div>
-
-                  <div>
-                    Primary Metric:{" "}
-                    {analysisResult.primaryMetric !=
-                    null
-                      ? `${analysisResult.primaryMetric}`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Secondary Metric:{" "}
-                    {analysisResult.secondaryMetric !=
-                    null
-                      ? `${analysisResult.secondaryMetric}`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Exercise:{" "}
-                    {activeExerciseName}
-                  </div>
-
-                  <div>
-                    Camera:{" "}
-                    {cameraStatus}
-                  </div>
-
-                  <div>
-                    Video Element:{" "}
-                    {
-                      videoElementStatus
-                    }
-                  </div>
-
-                  <div>
-                    Video Ready State:{" "}
-                    {
-                      videoReadyState
-                    }
-                  </div>
-
-                  <div>
-                    Video Width:{" "}
-                    {videoDimensions.width ||
-                      0}
-                  </div>
-
-                  <div>
-                    Video Height:{" "}
-                    {videoDimensions.height ||
-                      0}
-                  </div>
-
-                  <div>
-                    Video Src Object:{" "}
-                    {
-                      videoSrcObjectStatus
-                    }
-                  </div>
-
-                  <div>
-                    Video:{" "}
-                    {videoReady
-                      ? "READY"
-                      : "NOT READY"}
-                  </div>
-
-                  <div>
-                    Frame Loop:{" "}
-                    {
-                      frameLoopStatus
-                    }
-                  </div>
-
-                  <div>
-                    Frames Sent:{" "}
-                    {framesSent}
-                  </div>
-
-                  <div>
-                    Pose Detector:{" "}
-                    {
-                      poseDetectorStatus
-                    }
-                  </div>
-
-                  <div>
-                    Pose Result:{" "}
-                    {
-                      poseResultStatus
-                    }
-                  </div>
-
-                  <div>
-                    Last Pose Result:{" "}
-                    {lastPoseResultTimestamp
-                      ? new Date(
-                          lastPoseResultTimestamp
-                        ).toLocaleTimeString()
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Pose:{" "}
-                    {poseStatus}
-                  </div>
-
-                  <div>
-                    Landmarks:{" "}
-                    {landmarks.length ||
-                      analysisResult.landmarkCount ||
-                      0}
-                  </div>
-
-                  <div>
-                    Confidence:{" "}
-                    {analysisResult.confidence ??
-                      0}
-                    %
-                  </div>
-
-                  <div>
-                    Phase:{" "}
-                    {analysisResult.phase ||
-                      "READY"}
-                  </div>
-
-                  <div>
-                    Left Elbow:{" "}
-                    {analysisResult.metrics
-                        ?.leftElbowAngle !=
-                      null
-                      ? `${analysisResult.metrics.leftElbowAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Right Elbow:{" "}
-                    {analysisResult.metrics
-                        ?.rightElbowAngle !=
-                      null
-                      ? `${analysisResult.metrics.rightElbowAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Left Knee:{" "}
-                    {analysisResult.metrics
-                        ?.leftKneeAngle !=
-                      null
-                      ? `${analysisResult.metrics.leftKneeAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Right Knee:{" "}
-                    {analysisResult.metrics
-                        ?.rightKneeAngle !=
-                      null
-                      ? `${analysisResult.metrics.rightKneeAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Left Hip:{" "}
-                    {analysisResult.metrics
-                        ?.leftHipAngle !=
-                      null
-                      ? `${analysisResult.metrics.leftHipAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Right Hip:{" "}
-                    {analysisResult.metrics
-                        ?.rightHipAngle !=
-                      null
-                      ? `${analysisResult.metrics.rightHipAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Movement:{" "}
-                    {analysisResult.currentAngle !=
-                    null
-                      ? `${analysisResult.currentAngle.toFixed(
-                          1
-                        )}°`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Last Transition:{" "}
-                    {analysisResult.trace
-                        ?.lastTransition ||
-                      "READY"}
-                  </div>
-
-                  <div>
-                    Why:{" "}
-                    {analysisResult.trace
-                        ?.why ||
-                      "Waiting for movement."}
-                  </div>
-
-                  <div>
-                    REP BLOCKED REASON:{" "}
-                    {analysisResult.repBlockedReason ||
-                      "—"}
-                  </div>
-
-                  <div>
-                    Wrong Exercise:{" "}
-                    {analysisResult.wrongExercise
-                      ? "YES"
-                      : "NO"}
-                  </div>
-
-                  <div>
-                    Metrics:{" "}
-                    {JSON.stringify(
-                      analysisResult.metrics ||
-                        {}
-                    )}
-                  </div>
-
-                  <div>
-                    Form Score:{" "}
-                    {Number.isFinite(
-                      analysisResult.formScore
-                    )
-                      ? `${Math.round(
-                          analysisResult.formScore
-                        )}%`
-                      : "N/A"}
-                  </div>
-
-                  <div>
-                    Rep Count:{" "}
-                    {analysisResult.repCount ??
-                      0}
-                  </div>
-
-                  <div>
-                    Feedback:{" "}
-                    {Array.isArray(
-                      analysisResult.feedback
-                    )
-                      ? analysisResult.feedback.join(
-                          " | "
-                        )
-                      : "N/A"}
-                  </div>
-
-                  {poseError ? (
-                    <div>
-                      Pose Inference Error:{" "}
-                      {poseError}
-                    </div>
-                  ) : null}
+                  Browser:
+                  <br />
+                  {browser}
                 </div>
               </div>
             )}
