@@ -18,6 +18,7 @@ import AIChat from "./pages/AIChat.jsx";
 import Nutrition from "./pages/Nutrition.jsx";
 import Progress from "./pages/Progress.jsx";
 import ProfilePage from "./pages/Profile.jsx";
+import FAQPage from "./pages/FAQ.jsx";
 import ExerciseDetailPage from "./pages/ExerciseDetail.jsx";
 import FormChecker from "./pages/FormChecker.jsx";
 // Signup and ForgotPassword pages removed; use Profile for account actions
@@ -66,6 +67,7 @@ function App() {
               <Route path="nutrition" element={<Nutrition />} />
               <Route path="progress" element={<Progress />} />
               <Route path="profile" element={<ProfilePage />} />
+              <Route path="faq" element={<FAQPage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/profile" replace />} />

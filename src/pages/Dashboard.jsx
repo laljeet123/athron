@@ -102,6 +102,22 @@ function Dashboard() {
           </div>
         </GlassCard>
       </section>
+      <section className="dashboard-page__section" style={{ textAlign: "center", paddingTop: "20px" }}>
+        <button
+          onClick={() => navigate("/faq")}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#64748b",
+            fontSize: "0.9rem",
+            cursor: "pointer",
+            textDecoration: "underline",
+            opacity: 0.8
+          }}
+        >
+          Need help? View Frequently Asked Questions
+        </button>
+      </section>
     </div>
   );
 }

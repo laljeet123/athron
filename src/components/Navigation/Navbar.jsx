@@ -32,6 +32,9 @@ function Navbar() {
         <NavLink to="/profile" className={({ isActive }) => (isActive ? "navbar__link navbar__link--active" : "navbar__link")}>
           👤 {user?.name ? user.name : "Profile"}
         </NavLink>
+        <NavLink to="/faq" className={({ isActive }) => (isActive ? "navbar__link navbar__link--active" : "navbar__link")}>
+          Help
+        </NavLink>
       </nav>
     </header>
   );
